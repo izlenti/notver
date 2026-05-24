@@ -206,3 +206,106 @@ div.stButton > button:active {
 .custom-table tr:hover td {
     background-color: rgba(99, 102, 241, 0.05);
 }
+
+/* ----------------------------------------------------
+   YENİ MOBİL VE ARABİRİM GÜNCELLEMELERİ (NAVBAR & TABLO)
+   ---------------------------------------------------- */
+
+/* Responsive Tablo Sarmalayıcı */
+.table-responsive {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    margin-top: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.table-responsive::-webkit-scrollbar {
+    height: 6px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background-color: rgba(99, 102, 241, 0.3);
+    border-radius: 4px;
+}
+
+/* Navigasyon Alanı Konteyneri */
+.nav-container-fixed {
+    width: 100%;
+    margin-bottom: 25px;
+}
+
+/* Menü Butonları Özelleştirmesi */
+div[data-testid="stHorizontalBlock"] button[kind="primary"] {
+    background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%) !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    border: none !important;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3) !important;
+    transition: all 0.2s ease !important;
+    height: 48px !important;
+}
+
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    background: rgba(25, 27, 44, 0.65) !important;
+    color: #94a3b8 !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+    transition: all 0.2s ease !important;
+    height: 48px !important;
+}
+
+div[data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {
+    color: #ffffff !important;
+    border-color: rgba(99, 102, 241, 0.3) !important;
+    background: rgba(30, 32, 54, 0.8) !important;
+}
+
+/* Silme Butonu Stili */
+.delete-btn div.stButton > button {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3) !important;
+    font-size: 13px !important;
+    padding: 6px 14px !important;
+    border: none !important;
+}
+
+.delete-btn div.stButton > button:hover {
+    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;
+    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.5) !important;
+    transform: scale(1.02) !important;
+}
+
+/* Telefonlar ve Tabletler için Alt Menü (Bottom Navigation) Sabitlemesi */
+@media (max-width: 768px) {
+    /* Menü Çubuğunu Alta Sabitle */
+    .nav-container-fixed {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        background: rgba(13, 14, 21, 0.96) !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+        border-top: 1px solid rgba(99, 102, 241, 0.25) !important;
+        padding: 10px 10px 12px 10px !important;
+        z-index: 999999 !important;
+        box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.6) !important;
+        margin-bottom: 0px !important;
+    }
+    
+    /* Butonların font boyutunu mobilde biraz küçültelim ki sığsınlar */
+    div[data-testid="stHorizontalBlock"] button {
+        font-size: 11px !important;
+        padding: 4px 6px !important;
+        height: 42px !important;
+    }
+
+    /* Mobilde sayfanın en altına boşluk ekle ki alt bar içeriğin üstünü kapatmasın */
+    .block-container {
+        padding-bottom: 95px !important;
+    }
+}
+

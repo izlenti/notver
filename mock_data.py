@@ -62,7 +62,7 @@ MOCK_STUDENTS = {
         "id": "101",
         "name": "Ahmet Yılmaz",
         "writing_style": "clear",
-        "class": "12-A",
+        "class": "5-A",
         "grades": {
             "21": {
                 "score_concept": 8,
@@ -135,7 +135,7 @@ MOCK_STUDENTS = {
         "id": "103",
         "name": "Burak Öztürk (Dağınık Yazım Sınavı)",
         "writing_style": "messy_math",
-        "class": "12-B",
+        "class": "6-B",
         "grades": {
             "21": {
                 "score_concept": 8,
