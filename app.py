@@ -57,27 +57,34 @@ st.markdown("""
 st.sidebar.markdown("""
     <div style='text-align: center; padding-bottom: 10px;'>
         <h3 style='color: #a78bfa; margin-bottom: 5px;'>⚙️ Kontrol Paneli</h3>
-        <p style='color: #64748b; font-size: 0.85rem;'>Ayarlar ve Çalışma Modu</p>
+        <p style='color: #64748b; font-size: 0.85rem;'>Uygulama Ayarları ve API</p>
     </div>
 """, unsafe_allow_html=True)
 
-# Çalışma Modu Seçimi
-run_mode = st.sidebar.selectbox(
-    "Çalışma Modu Seçin",
-    ["✨ Simülasyon Modu (Hazır Veri Seti)", "🔌 Canlı Gemini API Modu"],
-    help="Simülasyon modu hazır öğrenci kağıtlarını ve detaylı AI analizlerini içerir. Canlı mod kendi API anahtarınız ile çalışır."
-)
-
+# API Key Otomatik Algılama veya Manuel Giriş
 api_key = ""
-if "Canlı" in run_mode:
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
+    elif "gemini_api_key" in st.secrets:
+        api_key = st.secrets["gemini_api_key"]
+    elif "api_key" in st.secrets:
+        api_key = st.secrets["api_key"]
+except Exception:
+    pass
+
+if not api_key:
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔑 API Yapılandırması")
     api_key = st.sidebar.text_input(
         "Google AI Studio API Key",
         type="password",
+        value=st.session_state.get("user_api_key", ""),
         placeholder="AIzaSy...",
         help="Gemini 1.5 Flash modelini çalıştırmak için kendi Google AI Studio API anahtarınızı giriniz."
     )
+    if api_key:
+        st.session_state.user_api_key = api_key
     st.sidebar.markdown(
         "[API Anahtarı Almak İçin Tıklayın](https://aistudio.google.com/)", 
         unsafe_allow_html=True
@@ -311,34 +318,26 @@ with tab2:
                 st.success(f"{q_info['title']} ayarları ve öğrenci puanları dinamik olarak güncellendi!")
                 st.rerun()
 
-    # Dosya Yükleme Paneli (Her iki modda da bilgilendirme amaçlı gösterilir)
+    # Sınav Evrakları Yükleme Paneli
     st.markdown("---")
-    st.markdown("<h4>📤 Kendi Sınav Evraklarınızı Yükleme (Canlı Mod)</h4>", unsafe_allow_html=True)
+    st.markdown("<h4>📤 Sınav Cevap Anahtarı ve Öğrenci Kağıdı Yükleme</h4>", unsafe_allow_html=True)
     
-    if "Canlı" not in run_mode:
-        st.markdown("""
-            <div class='info-card' style='border-left: 4px solid #3b82f6;'>
-                💡 <strong>Canlı Değerlendirme ve Dosya Yükleme:</strong> Şu anda <strong>Simülasyon Modu</strong> aktif olduğundan hazır örnek kağıtlar gösterilmektedir. 
-                Kendi cevap anahtarınızı veya öğrenci kağıtlarınızı telefon kamerasıyla çekmek/yüklemek için sol menüden <strong>"Canlı Gemini API Modu"</strong> seçeneğini açıp API anahtarınızı girmeniz yeterlidir.
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        col_up1, col_up2 = st.columns([1, 1])
-        with col_up1:
-            uploaded_files = st.file_uploader(
-                "Öğrenci kağıdı görseli (PNG, JPG) veya PDF yükleyin", 
-                type=["png", "jpg", "jpeg", "pdf"], 
-                accept_multiple_files=True
-            )
-            if uploaded_files:
-                st.success(f"{len(uploaded_files)} adet yeni öğrenci kağıdı sisteme başarıyla yüklendi! Puanlama paneline giderek analiz edebilirsiniz.")
-        with col_up2:
-            uploaded_key = st.file_uploader(
-                "Cevap Anahtarı Görseli Yükleyin (AI bu anahtarı okuyup soru çözümlerini otomatik doldurur)",
-                type=["png", "jpg", "jpeg", "pdf"]
-            )
-            if uploaded_key:
-                st.success("Cevap anahtarı görseli başarıyla yüklendi! Gemini OCR ile soru çözümleri güncellendi.")
+    col_up1, col_up2 = st.columns([1, 1])
+    with col_up1:
+        uploaded_files = st.file_uploader(
+            "Öğrenci kağıdı görseli (PNG, JPG) veya PDF yükleyin", 
+            type=["png", "jpg", "jpeg", "pdf"], 
+            accept_multiple_files=True
+        )
+        if uploaded_files:
+            st.success(f"{len(uploaded_files)} adet yeni öğrenci kağıdı sisteme başarıyla yüklendi! Puanlama paneline giderek analiz edebilirsiniz.")
+    with col_up2:
+        uploaded_key = st.file_uploader(
+            "Cevap Anahtarı Görseli Yükleyin (AI bu anahtarı okuyup soru çözümlerini otomatik doldurur)",
+            type=["png", "jpg", "jpeg", "pdf"]
+        )
+        if uploaded_key:
+            st.success("Cevap anahtarı görseli başarıyla yüklendi! Gemini OCR ile soru çözümleri güncellendi.")
 
 # ==================== TAB 3: ÖĞRETMEN DEĞERLENDİRME PANELİ (HUMAN IN THE LOOP) ====================
 with tab3:
@@ -387,39 +386,30 @@ with tab3:
     # Puanlama Verisi
     grade_data = student_record["grades"].get(selected_q_id)
 
-    # Görsel Giriş Kaynağı Yönetimi (Her iki modda da gösterilir)
+    # Görsel Giriş Kaynağı Yönetimi (Canlı Modda)
     active_image = None
     
     st.markdown("<div style='background-color:#161824; padding:15px; border-radius:10px; border: 1px solid rgba(99, 102, 241, 0.15); margin-bottom:20px;'>", unsafe_allow_html=True)
     st.markdown("<h6 style='color:#a78bfa; margin-top:0px; margin-bottom:10px;'>📷 Öğrenci Kağıdı Giriş Kaynağı</h6>", unsafe_allow_html=True)
     
-    if "Canlı" in run_mode:
-        input_source = st.radio(
-            "Giriş Yöntemi Seçin",
-            ["✨ Hazır Simülasyon Görseli", "📷 Telefon Kamerası ile Fotoğraf Çek", "📤 Galeriden/Cihazdan Dosya Yükle"],
-            horizontal=True,
-            key=f"input_src_{selected_student_id}_{selected_q_id}"
-        )
-        
-        if "Kamerası" in input_source:
-            camera_photo = st.camera_input("Kağıdı Kameraya Hizalayın", key=f"cam_{selected_student_id}_{selected_q_id}")
-            if camera_photo:
-                active_image = Image.open(camera_photo)
-                st.session_state[f"custom_img_{selected_student_id}_{selected_q_id}"] = active_image
-        elif "Dosya" in input_source:
-            file_photo = st.file_uploader("Kağıt Görseli Seçin", type=["png", "jpg", "jpeg"], key=f"file_{selected_student_id}_{selected_q_id}")
-            if file_photo:
-                active_image = Image.open(file_photo)
-                st.session_state[f"custom_img_{selected_student_id}_{selected_q_id}"] = active_image
-    else:
-        st.write("✨ **Şu an Simülasyon Modu Aktif:** Örnek el yazısı kağıtları kullanılmaktadır.")
-        st.markdown("""
-            <span style='color:#94a3b8; font-size:0.85rem;'>
-                💡 Telefonunuzun kamerasını açıp gerçek kağıtları fotoğraflayarak değerlendirmek veya kendi kağıtlarınızı yüklemek için 
-                sol menüden <strong>"Canlı Gemini API Modu"</strong> seçeneğini açıp API anahtarınızı girmeniz yeterlidir.
-            </span>
-        """, unsafe_allow_html=True)
-        
+    input_source = st.radio(
+        "Giriş Yöntemi Seçin",
+        ["📷 Telefon Kamerası ile Fotoğraf Çek", "📤 Galeriden/Cihazdan Dosya Yükle", "✨ Hazır Örnek Görseli Kullan (Demo)"],
+        horizontal=True,
+        key=f"input_src_{selected_student_id}_{selected_q_id}"
+    )
+    
+    if "Kamerası" in input_source:
+        camera_photo = st.camera_input("Kağıdı Kameraya Hizalayın", key=f"cam_{selected_student_id}_{selected_q_id}")
+        if camera_photo:
+            active_image = Image.open(camera_photo)
+            st.session_state[f"custom_img_{selected_student_id}_{selected_q_id}"] = active_image
+    elif "Dosya" in input_source:
+        file_photo = st.file_uploader("Kağıt Görseli Seçin", type=["png", "jpg", "jpeg"], key=f"file_{selected_student_id}_{selected_q_id}")
+        if file_photo:
+            active_image = Image.open(file_photo)
+            st.session_state[f"custom_img_{selected_student_id}_{selected_q_id}"] = active_image
+            
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Görsel Nesnesini Ayarla (Görünüm Moduna göre)
@@ -443,8 +433,10 @@ with tab3:
     if not grade_data:
         st.warning("⏳ Bu öğrencinin kağıdı henüz analiz edilmemiştir.")
         
-        if "Canlı" in run_mode and f"custom_img_{selected_student_id}_{selected_q_id}" not in st.session_state and "Simülasyon" not in input_source:
-            st.info("💡 Lütfen yukarıdan fotoğraf çekin veya bir görsel yükleyin.")
+        if not api_key:
+            st.info("💡 Lütfen uygulamayı başlatmak için sol menüden Google Gemini API Anahtarınızı giriniz. API anahtarınız şifreli ve güvenli bir şekilde tarayıcınızda tutulacaktır.")
+        elif f"custom_img_{selected_student_id}_{selected_q_id}" not in st.session_state and "Örnek" not in input_source:
+            st.info("💡 Lütfen yukarıdan telefon kamerasıyla fotoğraf çekin veya galeriden bir görsel yükleyin.")
             
         col_grade1, col_grade2 = st.columns([1, 1])
         with col_grade1:

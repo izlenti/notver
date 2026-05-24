@@ -3,6 +3,26 @@
 /* Google Fonts Import */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
 
+/* Hide Streamlit default components for a premium custom web app look */
+[data-testid="stHeader"] {
+    display: none !important;
+}
+header {
+    display: none !important;
+}
+#MainMenu {
+    display: none !important;
+}
+footer {
+    display: none !important;
+}
+
+/* Adjust page padding to remove top empty space */
+.block-container {
+    padding-top: 1.5rem !important;
+    padding-bottom: 2rem !important;
+}
+
 /* Global Styles */
 html, body, [data-testid="stAppViewContainer"] {
     font-family: 'Inter', sans-serif !important;
@@ -11,7 +31,7 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 /* Headings with Outfit Font */
-h1, h2, h3, h4, h5, h6, [data-testid="stHeader"] {
+h1, h2, h3, h4, h5, h6 {
     font-family: 'Outfit', sans-serif !important;
 }
 
