@@ -7,11 +7,16 @@ def initialize_session_state(mock_exam, mock_students):
     """
     Initializes the session state for managing student scores and exam configuration.
     """
-    # 1. Sınav Ayarlarını Başlat
+    # 1. Sınav Ayarlarını Başlat (Boş Başlangıç)
     if "exam_config" not in st.session_state:
-        st.session_state.exam_config = json.loads(json.dumps(mock_exam)) # Deep copy
+        st.session_state.exam_config = {
+            "title": "Yeni Geometri Sınavı",
+            "topic": "Çokgenler ve Açı Hesaplamaları",
+            "total_score": 100,
+            "questions": {}
+        }
         
-    # 2. Öğrenci Not Listesini Başlat (Üretim Seviyesinde Boş Başlangıç)
+    # 2. Öğrenci Not Listesini Başlat (Boş Başlangıç)
     if "student_records" not in st.session_state:
         st.session_state.student_records = {}
 

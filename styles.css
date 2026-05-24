@@ -234,8 +234,12 @@ div.stButton > button:active {
    WINDOWS 11 DOCK TARZI YÜZEN ALT GÖREV ÇUBUĞU (NAVBAR)
    ---------------------------------------------------- */
 
-/* Ortalı ve Yüzen Cam Dock (Universal Bottom Taskbar) */
-.bottom-nav-bar {
+/* ----------------------------------------------------
+   WINDOWS 11 DOCK TARZI YÜZEN ALT GÖREV ÇUBUĞU (NAVBAR)
+   ---------------------------------------------------- */
+
+/* Ortalı ve Yüzen Cam Dock (Universal Bottom Taskbar - Sibling targeting native Streamlit buttons) */
+div:has(> div > #nav-marker) + div {
     position: fixed !important;
     bottom: 24px !important;
     left: 50% !important;
@@ -256,8 +260,27 @@ div.stButton > button:active {
     gap: 16px !important;
 }
 
-/* Uygulama İkonu Haline Getirilmesi */
-.bottom-nav-bar a.nav-item {
+/* Force Streamlit column layouts to act as small horizontal segments */
+div:has(> div > #nav-marker) + div div[data-testid="column"] {
+    width: auto !important;
+    flex: none !important;
+}
+
+/* Force Streamlit button element containers to be inline/horizontal */
+div:has(> div > #nav-marker) + div div.element-container {
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: inline-block !important;
+}
+
+div:has(> div > #nav-marker) + div div.stButton {
+    width: auto !important;
+    margin: 0 !important;
+}
+
+/* Uygulama İkonu Haline Getirilmesi (Native Streamlit Buttons inside the dock) */
+div:has(> div > #nav-marker) + div div.stButton > button {
     width: 56px !important;
     height: 56px !important;
     min-width: 56px !important;
@@ -267,14 +290,14 @@ div.stButton > button:active {
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    text-decoration: none !important;
+    padding: 0 !important;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
     margin: 0 !important;
     position: relative !important;
 }
 
 /* Aktif Buton Stili (Windows Tarzı Alt Çizgili ve Parlayan) */
-.bottom-nav-bar a.nav-item.active {
+div:has(> div > #nav-marker) + div div.stButton > button[kind="primary"] {
     background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%) !important;
     box-shadow: 0 0 25px rgba(99, 102, 241, 0.7) !important;
     transform: scale(1.15) translateY(-4px) !important;
@@ -282,7 +305,7 @@ div.stButton > button:active {
 }
 
 /* Windows Tarzı Aktiflik Belirteç Çizgisi */
-.bottom-nav-bar a.nav-item.active::after {
+div:has(> div > #nav-marker) + div div.stButton > button[kind="primary"]::after {
     content: "" !important;
     position: absolute !important;
     bottom: -8px !important;
@@ -295,13 +318,13 @@ div.stButton > button:active {
 }
 
 /* İnaktif İkon Buton Stili */
-.bottom-nav-bar a.nav-item.inactive {
+div:has(> div > #nav-marker) + div div.stButton > button[kind="secondary"] {
     background: rgba(255, 255, 255, 0.05) !important;
     color: #94a3b8 !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
-.bottom-nav-bar a.nav-item.inactive:hover {
+div:has(> div > #nav-marker) + div div.stButton > button[kind="secondary"]:hover {
     background: rgba(99, 102, 241, 0.2) !important;
     color: #ffffff !important;
     transform: scale(1.1) translateY(-2px) !important;
@@ -340,15 +363,20 @@ iframe[title="Show user profile"], iframe[src*="profile"], div[data-testid="stSt
     display: none !important;
 }
 
+/* Sol üstteki gereksiz kontrol paneli (sidebar) açma butonunu gizleme ve sidebar'ı tamamen kapatma */
+[data-testid="collapsedControl"], [data-testid="stSidebar"] {
+    display: none !important;
+}
+
 /* Mobil Cihazlar İçin Uyumlu Ölçeklendirme */
 @media (max-width: 768px) {
-    .bottom-nav-bar {
+    div:has(> div > #nav-marker) + div {
         bottom: 16px !important;
         padding: 6px 16px !important;
         gap: 12px !important;
     }
     
-    .bottom-nav-bar a.nav-item {
+    div:has(> div > #nav-marker) + div div.stButton > button {
         width: 48px !important;
         height: 48px !important;
         min-width: 48px !important;
@@ -360,3 +388,5 @@ iframe[title="Show user profile"], iframe[src*="profile"], div[data-testid="stSt
         padding-bottom: 100px !important;
     }
 }
+
+

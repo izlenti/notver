@@ -24,7 +24,7 @@ st.set_page_config(
     page_title="Matematik Sınavı AI Notlandırma Sistemi",
     page_icon="📐",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # 2. Özel CSS Enjeksiyonu (Premium Koyu Tema ve Cam Morfolojisi)
@@ -53,15 +53,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# 5. Kenar Çubuğu (Sidebar) Tasarımı
-st.sidebar.markdown("""
-    <div style='text-align: center; padding-bottom: 10px;'>
-        <h3 style='color: #a78bfa; margin-bottom: 5px;'>⚙️ Kontrol Paneli</h3>
-        <p style='color: #64748b; font-size: 0.85rem;'>Uygulama Ayarları ve API</p>
-    </div>
-""", unsafe_allow_html=True)
-
-# API Key Otomatik Algılama veya Manuel Giriş
+# API Key Otomatik Algılama
 api_key = ""
 try:
     if "GEMINI_API_KEY" in st.secrets:
@@ -73,144 +65,208 @@ try:
 except Exception:
     pass
 
+# Eğer secrets içinde yoksa, kullanıcının manuel girdiğini al
 if not api_key:
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔑 API Yapılandırması")
-    api_key = st.sidebar.text_input(
-        "Google AI Studio API Key",
-        type="password",
-        value=st.session_state.get("user_api_key", ""),
-        placeholder="AIzaSy...",
-        help="Gemini 1.5 Flash modelini çalıştırmak için kendi Google AI Studio API anahtarınızı giriniz."
-    )
-    if api_key:
-        st.session_state.user_api_key = api_key
-    st.sidebar.markdown(
-        "[API Anahtarı Almak İçin Tıklayın](https://aistudio.google.com/)", 
-        unsafe_allow_html=True
-    )
+    api_key = st.session_state.get("user_api_key", "")
 
-# 5. Sınıf / Şube Seçimi ve Sınav İstatistik Özeti (Ana Ekrana Taşındı)
+# 5. Sınıf / Şube Seçimi ve Sınav İstatistik Özeti (Yan Yana İki Dropdown Filtresi)
 grades = ["5", "6", "7", "8"]
 branches = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
-class_options = ["Tüm Sınıflar"] + [f"{g}-{b}" for g in grades for b in branches]
 
-if "student_records" in st.session_state:
-    existing_classes = set(record.get("class", "5-A") for record in st.session_state.student_records.values())
-    for c in sorted(list(existing_classes)):
-        if c not in class_options:
-            class_options.append(c)
-
-col_h1, col_h2 = st.columns([2, 1])
+st.markdown("<h4 style='margin:0 0 10px 0; color:#a78bfa; font-family:\"Outfit\", sans-serif;'>🏫 Aktif Sınıf & Şube Filtresi</h4>", unsafe_allow_html=True)
+col_h1, col_h2 = st.columns(2)
 with col_h1:
-    st.markdown("<h4 style='margin:0; color:#a78bfa; font-family:\"Outfit\", sans-serif;'>🏫 Aktif Şube Filtresi</h4>", unsafe_allow_html=True)
+    selected_branch = st.selectbox(
+        "Şube Seçimi",
+        ["Tümü"] + branches,
+        help="Filtrelemek istediğiniz şubeyi seçiniz."
+    )
 with col_h2:
-    selected_class = st.selectbox(
-        "Sınıf Seçimi",
-        class_options,
-        label_visibility="collapsed",
-        help="İncelemek istediğiniz sınıf şubesini seçiniz."
+    selected_grade = st.selectbox(
+        "Sınıf Seviyesi Seçimi",
+        ["Tümü"] + grades,
+        help="Filtrelemek istediğiniz sınıf seviyesini seçiniz."
     )
 
-# İstatistik özetini hesapla
+# İstatistik özetini hesaplama ve filtreleme fonksiyonu
 student_df = get_class_dataframe()
-if selected_class != "Tüm Sınıflar":
-    student_df = student_df[student_df["Sınıf"] == selected_class]
 
-total_students = len(student_df)
-approved_count = len(student_df[student_df["Durum"] == "Onaylandı"])
-avg_score = student_df["Toplam Puan"].mean() if total_students > 0 else 0.0
+def filter_dataframe_by_class(df):
+    if df.empty:
+        return df
+    filtered_df = df.copy()
+    if selected_branch != "Tümü":
+        filtered_df = filtered_df[filtered_df["Sınıf"].apply(lambda x: str(x).split("-")[-1] == selected_branch if "-" in str(x) else False)]
+    if selected_grade != "Tümü":
+        filtered_df = filtered_df[filtered_df["Sınıf"].apply(lambda x: str(x).split("-")[0] == selected_grade if "-" in str(x) else False)]
+    return filtered_df
 
-# 6. Mobil / Masaüstü Arayüz Navigasyonu (Windows 11 Görev Çubuğu Dock Tarzı - Saf HTML)
+filtered_student_df = filter_dataframe_by_class(student_df)
+
+total_students = len(filtered_student_df)
+approved_count = len(filtered_student_df[filtered_student_df["Durum"] == "Onaylandı"]) if total_students > 0 else 0
+avg_score = filtered_student_df["Toplam Puan"].mean() if total_students > 0 else 0.0
+
+# 6. Mobil / Masaüstü Arayüz Navigasyonu (Windows 11 Görev Çubuğu Dock Tarzı - Native Streamlit Buttons)
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "cevap_anahtari"
 
-# Query Parametrelerinden Aktif Sekmeyi Oku (Sayfa Yenilemelerinde Kaybolmaz)
+# Query Parametrelerinden Aktif Sekmeyi Oku
 if "tab" in st.query_params:
     st.session_state.active_tab = st.query_params["tab"]
 
 active = st.session_state.active_tab
 
-# Saf HTML / CSS Görev Çubuğu (Windows Taskbar - Dikey Stacking Yapmaz!)
-nav_html = f"""
-<div class="bottom-nav-bar">
-    <a href="?tab=cevap_anahtari" class="nav-item {"active" if active == "cevap_anahtari" else "inactive"}" title="Cevap Anahtarı & Soru Ayarları">📐</a>
-    <a href="?tab=ogrenci_tarama" class="nav-item {"active" if active == "ogrenci_tarama" else "inactive"}" title="Öğrenci Kağıdı Giriş & Tarama">📷</a>
-    <a href="?tab=ai_degerlendirme" class="nav-item {"active" if active == "ai_degerlendirme" else "inactive"}" title="Yapay Zeka Değerlendirme & Denetim">🧠</a>
-    <a href="?tab=not_defteri" class="nav-item {"active" if active == "not_defteri" else "inactive"}" title="Sınav Sonuç Not Defteri">📋</a>
-</div>
-"""
-st.markdown(nav_html, unsafe_allow_html=True)
+# CSS ile Yüzen Dock yapabilmek için özel nav-marker elemanı
+st.markdown('<div id="nav-marker"></div>', unsafe_allow_html=True)
+
+# Native Streamlit Butonlarıyla Yüzen Navigasyon Çubuğu
+nav_cols = st.columns(4)
+tabs_data = [
+    ("cevap_anahtari", "📐", "Cevap Anahtarı & Soru Ayarları"),
+    ("ogrenci_tarama", "📷", "Öğrenci Kağıdı Giriş & Tarama"),
+    ("ai_degerlendirme", "🧠", "Yapay Zeka Değerlendirme & Denetim"),
+    ("not_defteri", "📋", "Sınav Sonuç Not Defteri")
+]
+
+for idx, (tab_id, emoji, help_text) in enumerate(tabs_data):
+    with nav_cols[idx]:
+        is_active = (active == tab_id)
+        btn_type = "primary" if is_active else "secondary"
+        if st.button(emoji, key=f"btn_nav_{tab_id}", type=btn_type, help=help_text):
+            st.session_state.active_tab = tab_id
+            st.query_params["tab"] = tab_id
+            st.rerun()
 
 # ==================== VIEW 1: CEVAP ANAHTARI ====================
 if st.session_state.active_tab == "cevap_anahtari":
     st.markdown("<h3 style='margin-bottom: 10px;'>📐 Sınav ve Dinamik Puanlama Tanımları</h3>", unsafe_allow_html=True)
+    
+    # 🔑 Google Gemini API Ayarları (Yalnızca Secrets'ta yoksa gösterilir!)
+    if not api_key:
+        with st.expander("🔑 Google Gemini API Ayarları (Manuel Giriş)", expanded=True):
+            st.warning("⚠️ Bulut ayarlarında (Streamlit Secrets) API anahtarı bulunamadı. Lütfen aşağıdan manuel girin:")
+            user_key = st.text_input("Google AI Studio API Key", type="password", value=st.session_state.get("user_api_key", ""), placeholder="AIzaSy...")
+            if user_key:
+                st.session_state.user_api_key = user_key
+                st.rerun()
+                
     st.write("Sınav sorularının detaylarını, cevap anahtarını ve her soruya ait **maksimum puan değerini** ayarlayabilirsiniz. Gemini AI bu puanları baz alarak alt rubrikleri otomatik ölçeklendirecektir.")
     
-    # Soru düzenleme kartı
-    for q_id, q_info in list(st.session_state.exam_config["questions"].items()):
-        with st.expander(f"🔍 {q_info['title']} ({q_info['max_score']} Puan)", expanded=(q_id == "21")):
-            col_left, col_right = st.columns([2, 1])
+    # Örnek veri yükleyici butonu (Doldurulabilir Demo Modu)
+    st.markdown("<h5>🧪 Hızlı Prototip ve Demo Araçları</h5>", unsafe_allow_html=True)
+    col_demo1, col_demo2 = st.columns([3, 1])
+    with col_demo1:
+        st.write("Uygulamayı sıfır konfigürasyonla anında test etmek için hazır geometri sorularını ve öğrenci kağıtlarını yükleyebilirsiniz:")
+    with col_demo2:
+        if st.button("🧪 Örnek Soru & Öğrenci Yükle", key="btn_load_mock_data", use_container_width=True):
+            # Örnek soruları yükle
+            st.session_state.exam_config = json.loads(json.dumps(MOCK_EXAM))
+            # Örnek öğrencileri yükle
+            st.session_state.student_records = json.loads(json.dumps(MOCK_STUDENTS))
+            st.success("Tebrikler! Örnek sınav soruları ve öğrenci yazılıları başarıyla yüklendi.")
+            st.rerun()
+
+    st.markdown("---")
+
+    questions_dict = st.session_state.exam_config.get("questions", {})
+    
+    if not questions_dict:
+        st.info("💡 Henüz tanımlanmış bir sınav sorusu bulunmamaktadır. Kendi sorunuzu eklemek için aşağıdaki 'Yeni Soru Ekle' formunu kullanabilir ya da üstteki 'Örnek Soru & Öğrenci Yükle' butonuyla test verilerini anında getirebilirsiniz.")
+    else:
+        # Soru düzenleme kartı
+        for q_id, q_info in list(questions_dict.items()):
+            with st.expander(f"🔍 {q_info['title']} ({q_info['max_score']} Puan)", expanded=(q_id == "21")):
+                col_left, col_right = st.columns([2, 1])
+                
+                with col_left:
+                    new_title = st.text_input(f"Soru Adı", value=q_info["title"], key=f"edit_title_{q_id}")
+                    new_desc = st.text_area(f"Soru Açıklaması", value=q_info["desc"], key=f"edit_desc_{q_id}", height=80)
+                    new_solution = st.text_area(f"Doğru Çözüm / Cevap Anahtarı", value=q_info["correct_solution"], key=f"edit_sol_{q_id}", height=120)
+                    
+                with col_right:
+                    # Dinamik Puan Ayarlaması
+                    new_max = st.number_input(
+                        f"Maksimum Puan Değeri", 
+                        min_value=5, 
+                        max_value=100, 
+                        value=int(q_info["max_score"]), 
+                        step=5, 
+                        key=f"edit_max_{q_id}"
+                    )
+                    
+                    # Rubrik Ağırlık Görselleştirmesi
+                    st.markdown(f"""
+                        **AI Alt Rubrik Dağılımı (Yüzde Oranları):**
+                        - **Kavramsal Yaklaşım (%40):** `{new_max * 0.40:.1f} Puan`
+                        - **İşlem Adımları (%40):** `{new_max * 0.40:.1f} Puan`
+                        - **Sonuç Doğruluğu (%20):** `{new_max * 0.20:.1f} Puan`
+                    """)
+                    
+                # Değişiklikleri Kaydet
+                if (new_title != q_info["title"] or new_desc != q_info["desc"] or 
+                    new_solution != q_info["correct_solution"] or new_max != q_info["max_score"]):
+                    
+                    st.session_state.exam_config["questions"][q_id]["title"] = new_title
+                    st.session_state.exam_config["questions"][q_id]["desc"] = new_desc
+                    st.session_state.exam_config["questions"][q_id]["correct_solution"] = new_solution
+                    st.session_state.exam_config["questions"][q_id]["max_score"] = new_max
+                    
+                    # Rubrik hesaplamalarını da güncelle
+                    st.session_state.exam_config["questions"][q_id]["rubric"] = {
+                        "concept": round(new_max * 0.40, 1),
+                        "steps": round(new_max * 0.40, 1),
+                        "result": round(new_max * 0.20, 1)
+                    }
+                    
+                    # Gerçek zamanlı öğrenci puanı ölçeklendirmesi
+                    old_max = q_info["max_score"]
+                    scale_factor = new_max / old_max
+                    
+                    for s_id, s_record in st.session_state.student_records.items():
+                        if q_id in s_record["grades"]:
+                            grade_data = s_record["grades"][q_id]
+                            
+                            grade_data["score_concept"] = min(round(grade_data["score_concept"] * scale_factor, 1), new_max * 0.4)
+                            grade_data["score_steps"] = min(round(grade_data["score_steps"] * scale_factor, 1), new_max * 0.4)
+                            grade_data["score_result"] = min(round(grade_data["score_result"] * scale_factor, 1), new_max * 0.2)
+                            
+                            new_total = round(grade_data["score_concept"] + grade_data["score_steps"] + grade_data["score_result"], 1)
+                            grade_data["score_total"] = new_total
+                            grade_data["teacher_score"] = new_total
+                            grade_data["ai_score_initial"] = new_total
+                    
+                    st.success(f"{q_info['title']} ayarları ve öğrenci puanları dinamik olarak güncellendi!")
+                    st.rerun()
+
+    # ➕ Yeni Soru Ekleme Formu
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("➕ Yeni Soru Ekle", expanded=False):
+        with st.form("new_question_form", clear_on_submit=True):
+            new_q_id = st.text_input("Soru No (Örn: 21, 22 veya 1, 2)", placeholder="21")
+            new_q_title = st.text_input("Soru Adı", placeholder="Soru 21: Çokgenler")
+            new_q_desc = st.text_area("Soru Metni / Açıklaması", placeholder="Bir dış açısı 15 derece olan çokgen...")
+            new_q_sol = st.text_area("Doğru Çözüm / Cevap Anahtarı", placeholder="360 / 15 = 24 kenarlıdır.")
+            new_q_max = st.number_input("Maksimum Puan", min_value=5, max_value=100, value=20, step=5)
             
-            with col_left:
-                new_title = st.text_input(f"Soru Adı", value=q_info["title"], key=f"edit_title_{q_id}")
-                new_desc = st.text_area(f"Soru Açıklaması", value=q_info["desc"], key=f"edit_desc_{q_id}", height=80)
-                new_solution = st.text_area(f"Doğru Çözüm / Cevap Anahtarı", value=q_info["correct_solution"], key=f"edit_sol_{q_id}", height=120)
-                
-            with col_right:
-                # Dinamik Puan Ayarlaması
-                new_max = st.number_input(
-                    f"Maksimum Puan Değeri", 
-                    min_value=5, 
-                    max_value=100, 
-                    value=int(q_info["max_score"]), 
-                    step=5, 
-                    key=f"edit_max_{q_id}"
-                )
-                
-                # Rubrik Ağırlık Görselleştirmesi
-                st.markdown(f"""
-                    **AI Alt Rubrik Dağılımı (Yüzde Oranları):**
-                    - **Kavramsal Yaklaşım (%40):** `{new_max * 0.40:.1f} Puan`
-                    - **İşlem Adımları (%40):** `{new_max * 0.40:.1f} Puan`
-                    - **Sonuç Doğruluğu (%20):** `{new_max * 0.20:.1f} Puan`
-                """)
-                
-            # Değişiklikleri Kaydet
-            if (new_title != q_info["title"] or new_desc != q_info["desc"] or 
-                new_solution != q_info["correct_solution"] or new_max != q_info["max_score"]):
-                
-                st.session_state.exam_config["questions"][q_id]["title"] = new_title
-                st.session_state.exam_config["questions"][q_id]["desc"] = new_desc
-                st.session_state.exam_config["questions"][q_id]["correct_solution"] = new_solution
-                st.session_state.exam_config["questions"][q_id]["max_score"] = new_max
-                
-                # Rubrik hesaplamalarını da güncelle
-                st.session_state.exam_config["questions"][q_id]["rubric"] = {
-                    "concept": round(new_max * 0.40, 1),
-                    "steps": round(new_max * 0.40, 1),
-                    "result": round(new_max * 0.20, 1)
-                }
-                
-                # Gerçek zamanlı öğrenci puanı ölçeklendirmesi
-                old_max = q_info["max_score"]
-                scale_factor = new_max / old_max
-                
-                for s_id, s_record in st.session_state.student_records.items():
-                    if q_id in s_record["grades"]:
-                        grade_data = s_record["grades"][q_id]
-                        
-                        grade_data["score_concept"] = min(round(grade_data["score_concept"] * scale_factor, 1), new_max * 0.4)
-                        grade_data["score_steps"] = min(round(grade_data["score_steps"] * scale_factor, 1), new_max * 0.4)
-                        grade_data["score_result"] = min(round(grade_data["score_result"] * scale_factor, 1), new_max * 0.2)
-                        
-                        new_total = round(grade_data["score_concept"] + grade_data["score_steps"] + grade_data["score_result"], 1)
-                        grade_data["score_total"] = new_total
-                        grade_data["teacher_score"] = new_total
-                        grade_data["ai_score_initial"] = new_total
-                
-                st.success(f"{q_info['title']} ayarları ve öğrenci puanları dinamik olarak güncellendi!")
-                st.rerun()
+            submit_question = st.form_submit_button("Soruyu Sınava Ekle")
+            if submit_question:
+                if not new_q_id.strip() or not new_q_title.strip():
+                    st.error("Lütfen en azından Soru No ve Soru Adı alanlarını doldurunuz!")
+                else:
+                    st.session_state.exam_config["questions"][new_q_id] = {
+                        "title": new_q_title,
+                        "desc": new_q_desc,
+                        "max_score": new_q_max,
+                        "correct_solution": new_q_sol,
+                        "rubric": {
+                            "concept": round(new_q_max * 0.40, 1),
+                            "steps": round(new_q_max * 0.40, 1),
+                            "result": round(new_q_max * 0.20, 1)
+                        }
+                    }
+                    st.success(f"{new_q_title} başarıyla eklendi!")
+                    st.rerun()
 
     # Sınav Evrakları Yükleme Paneli
     st.markdown("---")
@@ -339,13 +395,20 @@ elif st.session_state.active_tab == "ai_degerlendirme":
         student_ids = []
         student_options = []
         for s_id, record in st.session_state.student_records.items():
-            if selected_class == "Tüm Sınıflar" or record.get("class", "5-A") == selected_class:
+            s_class = record.get("class", "5-A")
+            class_parts = s_class.split("-") if "-" in s_class else [s_class, ""]
+            grade_part = class_parts[0]
+            branch_part = class_parts[-1]
+            match_branch = (selected_branch == "Tümü" or branch_part == selected_branch)
+            match_grade = (selected_grade == "Tümü" or grade_part == selected_grade)
+            
+            if match_branch and match_grade:
                 student_ids.append(s_id)
                 status_icon = "✅" if record["status"] == "Onaylandı" else "⏳"
-                student_options.append(f"{status_icon} No: {s_id} - {record['name']} ({record.get('class', '5-A')})")
+                student_options.append(f"{status_icon} No: {s_id} - {record['name']} ({s_class})")
                 
         if not student_options:
-            st.warning("⚠️ Seçili şubede taranmış öğrenci kağıdı bulunamadı. Lütfen sol menüden şubeyi değiştirin veya 'Tüm Sınıflar'ı seçin.")
+            st.warning("⚠️ Seçili şubede taranmış öğrenci kağıdı bulunamadı. Lütfen aktif sınıf & şube filtrelerini kontrol edin.")
         else:
             with col_sel1:
                 selected_student_idx = st.selectbox(
@@ -506,8 +569,7 @@ elif st.session_state.active_tab == "not_defteri":
             """, unsafe_allow_html=True)
         with col3:
             detailed_df = get_detailed_grades_dataframe()
-            if selected_class != "Tüm Sınıflar":
-                detailed_df = detailed_df[detailed_df["Sınıf"] == selected_class]
+            detailed_df = filter_dataframe_by_class(detailed_df)
             hardest_q = "Soru 25"
             lowest_ratio = 1.0
             
@@ -539,8 +601,7 @@ elif st.session_state.active_tab == "not_defteri":
             st.write("Sınıfınızdaki öğrencilerin soru bazlı ve toplam sınav notları dökümü aşağıdadır:")
             
             detailed_table = get_detailed_grades_dataframe()
-            if selected_class != "Tüm Sınıflar":
-                detailed_table = detailed_table[detailed_table["Sınıf"] == selected_class]
+            detailed_table = filter_dataframe_by_class(detailed_table)
             
             # HTML Tablosunun mobil uyumlu sarmalayıcı (.table-responsive) içine alınması (Yatay Kaydırma Çözümü)
             html_table = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
@@ -582,8 +643,15 @@ elif st.session_state.active_tab == "not_defteri":
             delete_options = []
             delete_mapping = {}
             for s_id, record in st.session_state.student_records.items():
-                if selected_class == "Tüm Sınıflar" or record.get("class") == selected_class:
-                    option_str = f"No: {s_id} - {record['name']} ({record.get('class', '5-A')})"
+                s_class = record.get("class", "5-A")
+                class_parts = s_class.split("-") if "-" in s_class else [s_class, ""]
+                grade_part = class_parts[0]
+                branch_part = class_parts[-1]
+                match_branch = (selected_branch == "Tümü" or branch_part == selected_branch)
+                match_grade = (selected_grade == "Tümü" or grade_part == selected_grade)
+                
+                if match_branch and match_grade:
+                    option_str = f"No: {s_id} - {record['name']} ({s_class})"
                     delete_options.append(option_str)
                     delete_mapping[option_str] = s_id
                     
