@@ -235,14 +235,13 @@ div.stButton > button:active {
    ---------------------------------------------------- */
 
 /* Ortalı ve Yüzen Cam Dock (Universal Bottom Taskbar) */
-.nav-container-fixed {
+.bottom-nav-bar {
     position: fixed !important;
     bottom: 24px !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     width: auto !important;
-    max-width: 95% !important;
-    background: rgba(18, 20, 32, 0.8) !important;
+    background: rgba(18, 20, 32, 0.85) !important;
     backdrop-filter: blur(20px) !important;
     -webkit-backdrop-filter: blur(20px) !important;
     border: 1px solid rgba(99, 102, 241, 0.25) !important;
@@ -251,27 +250,14 @@ div.stButton > button:active {
     z-index: 999999 !important;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65) !important;
     display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-}
-
-/* Sütunların yatay ve sıkışık dizilmesi */
-.nav-container-fixed div[data-testid="stHorizontalBlock"] {
-    display: flex !important;
     flex-direction: row !important;
-    flex-wrap: nowrap !important;
     justify-content: center !important;
     align-items: center !important;
     gap: 16px !important;
 }
 
-.nav-container-fixed div[data-testid="column"] {
-    width: auto !important;
-    flex: unset !important;
-}
-
-/* Butonların Daire/Uygulama İkonu Haline Getirilmesi */
-.nav-container-fixed button {
+/* Uygulama İkonu Haline Getirilmesi */
+.bottom-nav-bar a.nav-item {
     width: 56px !important;
     height: 56px !important;
     min-width: 56px !important;
@@ -281,14 +267,14 @@ div.stButton > button:active {
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0 !important;
+    text-decoration: none !important;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
     margin: 0 !important;
     position: relative !important;
 }
 
 /* Aktif Buton Stili (Windows Tarzı Alt Çizgili ve Parlayan) */
-.nav-container-fixed button[kind="primary"] {
+.bottom-nav-bar a.nav-item.active {
     background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%) !important;
     box-shadow: 0 0 25px rgba(99, 102, 241, 0.7) !important;
     transform: scale(1.15) translateY(-4px) !important;
@@ -296,7 +282,7 @@ div.stButton > button:active {
 }
 
 /* Windows Tarzı Aktiflik Belirteç Çizgisi */
-.nav-container-fixed button[kind="primary"]::after {
+.bottom-nav-bar a.nav-item.active::after {
     content: "" !important;
     position: absolute !important;
     bottom: -8px !important;
@@ -309,13 +295,13 @@ div.stButton > button:active {
 }
 
 /* İnaktif İkon Buton Stili */
-.nav-container-fixed button[kind="secondary"] {
+.bottom-nav-bar a.nav-item.inactive {
     background: rgba(255, 255, 255, 0.05) !important;
     color: #94a3b8 !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
-.nav-container-fixed button[kind="secondary"]:hover {
+.bottom-nav-bar a.nav-item.inactive:hover {
     background: rgba(99, 102, 241, 0.2) !important;
     color: #ffffff !important;
     transform: scale(1.1) translateY(-2px) !important;
@@ -342,13 +328,27 @@ div.stButton > button:active {
     padding-bottom: 120px !important;
 }
 
+/* ----------------------------------------------------
+   STREAMLIT ORTAK BİLEŞENLERİNİ VE LOGOLARI GİZLEME
+   ---------------------------------------------------- */
+footer, .viewerBadge, div[class*="viewerBadge"], div[class*="stDecoration"], div.viewerBadge {
+    display: none !important;
+}
+
+/* Sağ alttaki Streamlit profil ve kırmızı Community filigranını gizleme */
+iframe[title="Show user profile"], iframe[src*="profile"], div[data-testid="stStatusWidget"] {
+    display: none !important;
+}
+
+/* Mobil Cihazlar İçin Uyumlu Ölçeklendirme */
 @media (max-width: 768px) {
-    .nav-container-fixed {
+    .bottom-nav-bar {
         bottom: 16px !important;
         padding: 6px 16px !important;
+        gap: 12px !important;
     }
     
-    .nav-container-fixed button {
+    .bottom-nav-bar a.nav-item {
         width: 48px !important;
         height: 48px !important;
         min-width: 48px !important;
@@ -360,5 +360,3 @@ div.stButton > button:active {
         padding-bottom: 100px !important;
     }
 }
-
-

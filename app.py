@@ -90,31 +90,29 @@ if not api_key:
         unsafe_allow_html=True
     )
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("🏫 Sınıf / Şube Seçimi")
-
-# Sınıf seçiminde 5,6,7,8. sınıflar ve I harfine kadar şubeler dinamik oluşturuluyor
+# 5. Sınıf / Şube Seçimi ve Sınav İstatistik Özeti (Ana Ekrana Taşındı)
 grades = ["5", "6", "7", "8"]
 branches = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 class_options = ["Tüm Sınıflar"] + [f"{g}-{b}" for g in grades for b in branches]
 
-# Mock verilerden veya mevcut verilerden başka sınıf varsa ekleyelim (örn. 12-A)
 if "student_records" in st.session_state:
     existing_classes = set(record.get("class", "5-A") for record in st.session_state.student_records.values())
     for c in sorted(list(existing_classes)):
         if c not in class_options:
             class_options.append(c)
 
-selected_class = st.sidebar.selectbox(
-    "Filtrelenecek Şube",
-    class_options,
-    help="İncelemek istediğiniz şubeyi seçerek tüm analizleri ve öğrenci listesini o sınıfa göre filtreleyebilirsiniz."
-)
+col_h1, col_h2 = st.columns([2, 1])
+with col_h1:
+    st.markdown("<h4 style='margin:0; color:#a78bfa; font-family:\"Outfit\", sans-serif;'>🏫 Aktif Şube Filtresi</h4>", unsafe_allow_html=True)
+with col_h2:
+    selected_class = st.selectbox(
+        "Sınıf Seçimi",
+        class_options,
+        label_visibility="collapsed",
+        help="İncelemek istediğiniz sınıf şubesini seçiniz."
+    )
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("📈 Sınav Özet Durumu")
-
-# Kolay istatistikler (Seçili sınıfa göre filtrelenmiş)
+# İstatistik özetini hesapla
 student_df = get_class_dataframe()
 if selected_class != "Tüm Sınıflar":
     student_df = student_df[student_df["Sınıf"] == selected_class]
@@ -123,63 +121,26 @@ total_students = len(student_df)
 approved_count = len(student_df[student_df["Durum"] == "Onaylandı"])
 avg_score = student_df["Toplam Puan"].mean() if total_students > 0 else 0.0
 
-st.sidebar.markdown(f"""
-- **Seçili Sınıf:** `{selected_class}`
-- **Toplam Öğrenci:** `{total_students}`
-- **Onaylanan Kağıtlar:** `{approved_count} / {total_students}`
-- **Sınıf Ortalaması:** `{avg_score:.1f} / 100`
-""")
-
-# Yeniden Başlatma Butonu
-if st.sidebar.button("🔄 Verileri Sıfırla"):
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
-
-# 6. Mobil / Masaüstü Arayüz Navigasyonu (Windows 11 Görev Çubuğu Dock Tarzı)
+# 6. Mobil / Masaüstü Arayüz Navigasyonu (Windows 11 Görev Çubuğu Dock Tarzı - Saf HTML)
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "cevap_anahtari"
 
-# Yüzen Dairesel İkon Menüsü (Windows Görev Çubuğu)
-st.markdown('<div class="nav-container-fixed">', unsafe_allow_html=True)
-col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
-with col_nav1:
-    if st.button(
-        "📐", 
-        type="primary" if st.session_state.active_tab == "cevap_anahtari" else "secondary",
-        help="Sınav & Cevap Anahtarı Tanımları",
-        key="btn_nav_cevap"
-    ):
-        st.session_state.active_tab = "cevap_anahtari"
-        st.rerun()
-with col_nav2:
-    if st.button(
-        "📷", 
-        type="primary" if st.session_state.active_tab == "ogrenci_tarama" else "secondary",
-        help="Öğrenci Kağıdı Giriş & Tarama",
-        key="btn_nav_tarama"
-    ):
-        st.session_state.active_tab = "ogrenci_tarama"
-        st.rerun()
-with col_nav3:
-    if st.button(
-        "🧠", 
-        type="primary" if st.session_state.active_tab == "ai_degerlendirme" else "secondary",
-        help="Yapay Zeka Değerlendirme & Denetim",
-        key="btn_nav_deger"
-    ):
-        st.session_state.active_tab = "ai_degerlendirme"
-        st.rerun()
-with col_nav4:
-    if st.button(
-        "📋", 
-        type="primary" if st.session_state.active_tab == "not_defteri" else "secondary",
-        help="Not Defteri & Başarı Analizleri",
-        key="btn_nav_defteri"
-    ):
-        st.session_state.active_tab = "not_defteri"
-        st.rerun()
-st.markdown('</div>', unsafe_allow_html=True)
+# Query Parametrelerinden Aktif Sekmeyi Oku (Sayfa Yenilemelerinde Kaybolmaz)
+if "tab" in st.query_params:
+    st.session_state.active_tab = st.query_params["tab"]
+
+active = st.session_state.active_tab
+
+# Saf HTML / CSS Görev Çubuğu (Windows Taskbar - Dikey Stacking Yapmaz!)
+nav_html = f"""
+<div class="bottom-nav-bar">
+    <a href="?tab=cevap_anahtari" class="nav-item {"active" if active == "cevap_anahtari" else "inactive"}" title="Cevap Anahtarı & Soru Ayarları">📐</a>
+    <a href="?tab=ogrenci_tarama" class="nav-item {"active" if active == "ogrenci_tarama" else "inactive"}" title="Öğrenci Kağıdı Giriş & Tarama">📷</a>
+    <a href="?tab=ai_degerlendirme" class="nav-item {"active" if active == "ai_degerlendirme" else "inactive"}" title="Yapay Zeka Değerlendirme & Denetim">🧠</a>
+    <a href="?tab=not_defteri" class="nav-item {"active" if active == "not_defteri" else "inactive"}" title="Sınav Sonuç Not Defteri">📋</a>
+</div>
+"""
+st.markdown(nav_html, unsafe_allow_html=True)
 
 # ==================== VIEW 1: CEVAP ANAHTARI ====================
 if st.session_state.active_tab == "cevap_anahtari":
