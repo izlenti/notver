@@ -9,7 +9,6 @@ import io
 from utils import (
     initialize_session_state,
     get_approved_grades_dataframe,
-    get_all_students_dataframe,
 )
 from gemini_integration import (
     read_answer_key,
@@ -30,19 +29,16 @@ st.set_page_config(
 # ═══════════════════════════════════════════════════════
 # 2. CSS Yükleme
 # ═══════════════════════════════════════════════════════
-_css_path = os.path.join(os.path.dirname(__file__), "styles.css")
+_css_path = "styles.css"
 if os.path.exists(_css_path):
     with open(_css_path, encoding="utf-8") as _f:
         st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════
-# 3. Session State Başlatma
+# 3. Session State & API Key
 # ═══════════════════════════════════════════════════════
 initialize_session_state()
 
-# ═══════════════════════════════════════════════════════
-# 4. API Key Tespiti
-# ═══════════════════════════════════════════════════════
 api_key = ""
 try:
     for _k in ("GEMINI_API_KEY", "gemini_api_key", "api_key"):
@@ -55,67 +51,24 @@ if not api_key:
     api_key = st.session_state.get("user_api_key", "")
 
 # ═══════════════════════════════════════════════════════
-# 5. Üst Başlık
+# 4. Üst Başlık
 # ═══════════════════════════════════════════════════════
 st.markdown("""
-<div style='text-align:center; padding: 10px 0 18px 0;'>
-    <h1 class='gradient-text' style='font-size:2.2rem; margin:0;'>📐 Sınav AI Notlandırma</h1>
-    <p style='color:#475569; font-size:0.95rem; margin:4px 0 0 0;'>
+<div style='text-align:center; padding: 8px 0 14px 0;'>
+    <h1 class='gradient-text' style='font-size:2rem; margin:0; line-height:1.2;'>📐 Sınav AI Notlandırma</h1>
+    <p style='color:#475569; font-size:0.88rem; margin:4px 0 0 0;'>
         Cevap anahtarı yükle → Öğrenci kağıtlarını tara → Yapay zeka puanlasın
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════
-# 6. Sekme Yönetimi (URL query params)
-# ═══════════════════════════════════════════════════════
-TABS = [
-    ("cevap_anahtari",  "📐", "Cevap Anahtarı"),
-    ("sinav_kagidi",    "📷", "Sınav Kağıdı"),
-    ("ai_degerlendirme","🧠", "AI Değerlendirme"),
-    ("not_cizelgesi",   "📋", "Not Çizelgesi"),
-]
-
-# Query param'dan sekmeyi oku (sayfa yenileme veya link paylaşımı için)
-_qp = st.query_params.get("tab", "")
-if _qp and _qp in [t[0] for t in TABS]:
-    st.session_state.active_tab = _qp
-
-active = st.session_state.active_tab
-
-# ═══════════════════════════════════════════════════════
-# 7. Windows 11 Dock (Saf HTML — target="_self" ile)
-# ═══════════════════════════════════════════════════════
-def _dock_items():
-    items = ""
-    for tab_id, emoji, label in TABS:
-        cls = "dock-item nav-active" if active == tab_id else "dock-item"
-        items += f"""
-        <a href="?tab={tab_id}" class="{cls}" target="_self">
-            <span class="dock-label">{label}</span>
-            {emoji}
-        </a>"""
-    return items
-
-st.markdown(f"""
-<div class="win11-dock">
-    {_dock_items()}
-</div>
-""", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════
-# YARDIMCI FONKSİYONLAR
-# ═══════════════════════════════════════════════════════
-GRADES   = ["5", "6", "7", "8"]
-BRANCHES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
-
+# ─── API Key uyarısı (Secrets'ta yoksa) ───
 def _api_warning():
-    """API anahtarı yoksa uyarı ve giriş kutusu göster."""
     if not api_key:
         with st.expander("🔑 Google Gemini API Anahtarı Gerekli", expanded=True):
-            st.warning("Streamlit Secrets'ta API anahtarı bulunamadı. Lütfen aşağıya giriniz:")
+            st.warning("Streamlit Secrets'ta API anahtarı bulunamadı.")
             typed = st.text_input("API Key", type="password",
-                                   value=st.session_state.get("user_api_key", ""),
+                                   value=st.session_state.get("user_api_key",""),
                                    placeholder="AIzaSy...")
             if typed:
                 st.session_state.user_api_key = typed
@@ -123,85 +76,87 @@ def _api_warning():
         return False
     return True
 
-def _status_badge(status):
-    cls_map = {
-        "Onaylandı": "status-approved",
-        "Değerlendirildi": "status-evaluated",
-        "Bekliyor": "status-pending",
-    }
-    cls = cls_map.get(status, "status-pending")
+# ─── Status badge ───
+def _badge(status):
+    cls = {"Onaylandı": "status-approved",
+           "Değerlendirildi": "status-evaluated",
+           "Bekliyor": "status-pending"}.get(status, "status-pending")
     return f"<span class='status-badge {cls}'>{status}</span>"
 
-def _pil_to_bytes(img):
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+GRADES   = ["5", "6", "7", "8"]
+BRANCHES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 
+# ═══════════════════════════════════════════════════════
+# 5. Native st.tabs() — CSS ile altta görev çubuğuna dönüştürülecek
+# ═══════════════════════════════════════════════════════
+tab_ca, tab_sk, tab_ai, tab_nc = st.tabs([
+    "📐  Cevap Anahtarı",
+    "📷  Sınav Kağıdı",
+    "🧠  AI Değerlendirme",
+    "📋  Not Çizelgesi",
+])
 
 # ╔═══════════════════════════════════════════════════════╗
 # ║  TAB 1 — CEVAP ANAHTARI                              ║
 # ╚═══════════════════════════════════════════════════════╝
-if active == "cevap_anahtari":
-    st.markdown("## 📐 Cevap Anahtarı Yükleme")
-    st.markdown("""
-    <div class='callout-info'>
-        Sınav kağıdının <strong>cevap anahtarını</strong> görsel olarak yükleyin.  
-        Yapay zeka soruları, doğru cevapları ve puan değerlerini görselden otomatik okuyacaktır.
-    </div>
-    """, unsafe_allow_html=True)
+with tab_ca:
+    st.markdown("### 📐 Cevap Anahtarı Yükleme")
 
     cfg = st.session_state.exam_config
+
+    st.markdown("""
+    <div class='callout-info'>
+        Sınav kağıdının <strong>cevap anahtarını</strong> görsel olarak yükleyin.
+        Yapay zeka soruları, doğru cevapları ve puan değerlerini görselden otomatik okur.
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── Sınıf & Şube seçimi ──
     col1, col2 = st.columns(2)
     with col1:
-        sel_grade = st.selectbox("Sınıf", GRADES,
-                                  index=GRADES.index(cfg["grade"]) if cfg["grade"] in GRADES else 0,
-                                  key="ca_grade")
+        idx_g = GRADES.index(cfg["grade"]) if cfg["grade"] in GRADES else 0
+        sel_grade = st.selectbox("Sınıf", GRADES, index=idx_g, key="ca_grade")
     with col2:
-        sel_branch = st.selectbox("Şube", BRANCHES,
-                                   index=BRANCHES.index(cfg["branch"]) if cfg["branch"] in BRANCHES else 0,
-                                   key="ca_branch")
+        idx_b = BRANCHES.index(cfg["branch"]) if cfg["branch"] in BRANCHES else 0
+        sel_branch = st.selectbox("Şube", BRANCHES, index=idx_b, key="ca_branch")
 
     st.session_state.exam_config["grade"] = sel_grade
     st.session_state.exam_config["branch"] = sel_branch
 
     st.markdown("---")
 
-    # ── Dosya Yükleme ──
-    st.markdown("### 📤 Cevap Anahtarı Görselleri")
-    st.write("Sınavınızın cevap anahtarını yükleyin. Birden fazla sayfa varsa hepsini seçebilirsiniz.")
-
+    # ── Dosya yükleme ──
     uploaded_keys = st.file_uploader(
         "Cevap anahtarı görseli (PNG, JPG) — birden fazla sayfa seçilebilir",
-        type=["png", "jpg", "jpeg"],
+        type=["png","jpg","jpeg"],
         accept_multiple_files=True,
         key="uploader_answer_key"
     )
 
     if uploaded_keys:
         st.markdown(f"**{len(uploaded_keys)} sayfa yüklendi.** Önizleme:")
-        preview_cols = st.columns(min(len(uploaded_keys), 4))
         pil_images = []
+        prev_cols = st.columns(min(len(uploaded_keys), 4))
         for i, f in enumerate(uploaded_keys):
             img = Image.open(f).convert("RGB")
             pil_images.append(img)
-            with preview_cols[i % 4]:
+            with prev_cols[i % 4]:
                 st.image(img, use_container_width=True, caption=f"Sayfa {i+1}")
 
         st.markdown("---")
+        col_sv, col_ai_btn = st.columns([1, 2])
 
-        col_save, col_ai = st.columns([1, 2])
-
-        with col_save:
-            if st.button("💾 Görselleri Kaydet (AI Okuma Olmadan)", use_container_width=True):
+        with col_sv:
+            if st.button("💾 Görselleri Kaydet (AI Okuma Olmadan)", use_container_width=True,
+                         key="btn_save_key_only"):
                 st.session_state.exam_config["answer_key_images"] = pil_images
                 st.session_state.exam_config["key_saved"] = True
                 st.session_state.exam_config["questions"] = {}
-                st.success("Cevap anahtarı görselleri kaydedildi. Öğrenci değerlendirmesinde AI bu görseli kullanacak.")
+                st.success("Cevap anahtarı görselleri kaydedildi.")
 
-        with col_ai:
-            if st.button("🤖 AI ile Oku ve Soru Yapısını Çıkar (Önerilen)", type="primary", use_container_width=True):
+        with col_ai_btn:
+            if st.button("🤖 AI ile Oku — Soruları ve Puanları Çıkar (Önerilen)",
+                         type="primary", use_container_width=True, key="btn_ai_read_key"):
                 if not _api_warning():
                     st.stop()
                 with st.spinner("Gemini AI cevap anahtarını okuyup soruları çıkartıyor..."):
@@ -213,465 +168,395 @@ if active == "cevap_anahtari":
                     st.session_state.exam_config["total_max_score"] = result.get("total_max_score", 0)
                     st.session_state.exam_config["key_saved"] = True
                     st.success("✅ Cevap anahtarı başarıyla okundu!")
-
-                    qs = result.get("questions", {})
-                    if qs:
-                        st.markdown("**AI'ın Tespit Ettiği Sorular:**")
-                        for qid, qinfo in qs.items():
-                            st.markdown(f"- **Soru {qid}:** {qinfo.get('title', '')} — **{qinfo.get('max_score', 0)} Puan**")
-                        st.markdown(f"**Toplam:** {result.get('total_max_score', 0)} Puan")
+                    for qid, qinfo in result.get("questions", {}).items():
+                        st.markdown(f"- **Soru {qid}:** {qinfo.get('title','')} — **{qinfo.get('max_score',0)} Puan**")
+                    st.markdown(f"**Toplam:** {result.get('total_max_score',0)} Puan")
                 else:
                     st.error(f"Hata: {result.get('error')}")
 
-    # ── Mevcut durumu göster ──
+    # ── Mevcut durum ──
     if cfg.get("key_saved") and cfg.get("answer_key_images"):
         st.markdown("---")
+        n_img = len(cfg["answer_key_images"])
+        n_q   = len(cfg.get("questions", {}))
         st.markdown(f"""
         <div class='callout-success'>
-            ✅ <strong>Cevap anahtarı yüklü!</strong>
-            Sınıf: <strong>{cfg['grade']}</strong> &nbsp;|&nbsp;
-            Şube: <strong>{cfg['branch']}</strong> &nbsp;|&nbsp;
-            {len(cfg['answer_key_images'])} sayfa &nbsp;|&nbsp;
-            {len(cfg.get('questions', {}))} soru tespit edildi
+            ✅ <strong>Cevap anahtarı yüklü</strong> —
+            Sınıf <strong>{cfg['grade']}-{cfg['branch']}</strong> |
+            {n_img} sayfa | {n_q} soru tespit edildi
         </div>
         """, unsafe_allow_html=True)
 
         if cfg.get("questions"):
-            with st.expander("📋 Tespit Edilen Soru Yapısı (Düzenle)", expanded=False):
-                qs = cfg["questions"]
-                for qid in sorted(qs.keys(), key=lambda x: int(x) if x.isdigit() else x):
-                    q = qs[qid]
-                    with st.expander(f"Soru {qid} — {q.get('max_score', 0)} Puan", expanded=False):
-                        new_max = st.number_input(f"Maksimum Puan (Soru {qid})",
-                                                   min_value=1, max_value=200,
-                                                   value=int(q.get("max_score", 10)),
-                                                   key=f"edit_max_{qid}")
-                        new_sol = st.text_area(f"Doğru Çözüm / Notlar (Soru {qid})",
-                                               value=q.get("correct_solution", ""),
-                                               height=80, key=f"edit_sol_{qid}")
-                        if new_max != q.get("max_score") or new_sol != q.get("correct_solution"):
-                            st.session_state.exam_config["questions"][qid]["max_score"] = new_max
-                            st.session_state.exam_config["questions"][qid]["correct_solution"] = new_sol
+            with st.expander("📋 Tespit Edilen Soru Yapısını Görüntüle / Düzenle"):
+                for qid in sorted(cfg["questions"].keys(),
+                                   key=lambda x: int(x) if x.isdigit() else x):
+                    q = cfg["questions"][qid]
+                    with st.expander(f"Soru {qid} — {q.get('max_score', 0)} Puan"):
+                        nm = st.number_input(f"Maksimum Puan", min_value=1, max_value=200,
+                                              value=int(q.get("max_score", 10)),
+                                              key=f"em_{qid}")
+                        ns = st.text_area("Doğru Çözüm Notu", value=q.get("correct_solution",""),
+                                           height=70, key=f"es_{qid}")
+                        if nm != q.get("max_score") or ns != q.get("correct_solution"):
+                            st.session_state.exam_config["questions"][qid]["max_score"] = nm
+                            st.session_state.exam_config["questions"][qid]["correct_solution"] = ns
 
-        if st.button("🗑️ Cevap Anahtarını Sıfırla", key="reset_answer_key"):
+        if st.button("🗑️ Cevap Anahtarını Sıfırla", key="btn_reset_ca"):
             st.session_state.exam_config = {
-                "grade": "", "branch": "", "answer_key_images": [],
-                "questions": {}, "total_max_score": 0, "key_saved": False,
+                "grade":"","branch":"","answer_key_images":[],
+                "questions":{},"total_max_score":0,"key_saved":False,
             }
             st.rerun()
     elif not uploaded_keys:
         st.markdown("""
         <div class='callout-warn'>
-            ⚠️ Henüz cevap anahtarı yüklenmedi. Yukarıdan sınav cevap anahtarı görselini yükleyin.
+            ⚠️ Henüz cevap anahtarı yüklenmedi.
         </div>
         """, unsafe_allow_html=True)
+
+    # Secrets'ta API yoksa giriş alanı göster
+    if not api_key:
+        st.markdown("---")
+        _api_warning()
 
 
 # ╔═══════════════════════════════════════════════════════╗
 # ║  TAB 2 — SINAV KAĞIDI YÜKLEME                        ║
 # ╚═══════════════════════════════════════════════════════╝
-elif active == "sinav_kagidi":
-    st.markdown("## 📷 Sınav Kağıdı Yükleme")
-
+with tab_sk:
+    st.markdown("### 📷 Sınav Kağıdı Yükleme")
     cfg = st.session_state.exam_config
+
     if not cfg.get("key_saved"):
         st.markdown("""
         <div class='callout-warn'>
-            ⚠️ Önce <strong>Cevap Anahtarı</strong> sekmesinden cevap anahtarını yüklemelisiniz!
+            ⚠️ Önce <strong>Cevap Anahtarı</strong> sekmesinden cevap anahtarını yükleyin!
         </div>
         """, unsafe_allow_html=True)
-        st.stop()
-
-    st.markdown(f"""
-    <div class='callout-info'>
-        Aktif sınıf: <strong>{cfg['grade']}-{cfg['branch']}</strong> &nbsp;|&nbsp;
-        Cevap anahtarı: <strong>{len(cfg['answer_key_images'])} sayfa</strong> hazır.
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-    Öğrenci sınav kağıtlarını **kameradan çekerek** veya **galeriden seçerek** yükleyin.  
-    Yapay zeka kağıttaki **Ad Soyad**, **Numara** ve **Sınıf** bilgilerini otomatik okuyacaktır.
-    """)
-
-    st.markdown("---")
-
-    # ── Yükleme yöntemi seçimi ──
-    method = st.radio("Yükleme yöntemi:", ["📁 Galeriden Seç", "📷 Kameradan Çek"],
-                      horizontal=True, key="upload_method")
-
-    student_image = None
-    if method == "📁 Galeriden Seç":
-        uploaded = st.file_uploader(
-            "Öğrenci sınav kağıdı (PNG, JPG)",
-            type=["png", "jpg", "jpeg"],
-            key="uploader_student_gallery"
-        )
-        if uploaded:
-            student_image = Image.open(uploaded).convert("RGB")
     else:
-        cam = st.camera_input("Kağıdı hizalayın ve çekin", key="cam_student")
-        if cam:
-            student_image = Image.open(cam).convert("RGB")
+        st.markdown(f"""
+        <div class='callout-info'>
+            Aktif sınıf: <strong>{cfg['grade']}-{cfg['branch']}</strong> |
+            Cevap anahtarı: <strong>{len(cfg['answer_key_images'])} sayfa</strong> hazır.
+        </div>
+        """, unsafe_allow_html=True)
 
-    if student_image:
-        st.markdown("---")
-        col_prev, col_action = st.columns([1, 1])
-        with col_prev:
-            st.markdown("**Yüklenen Görsel:**")
-            st.image(student_image, use_container_width=True)
+        st.write("Öğrenci kağıtlarını **kameradan** veya **galeriden** yükleyin. AI adı, numarayı, sınıfı otomatik okur.")
 
-        with col_action:
-            st.markdown("**İşlemler:**")
-            st.info("Butona basınca AI kağıttaki öğrenci bilgilerini (ad, numara, sınıf) okuyacak ve sisteme kaydedecektir.")
+        method = st.radio("Yükleme yöntemi:", ["📁 Galeriden Seç", "📷 Kameradan Çek"],
+                          horizontal=True, key="sk_method")
 
-            if not _api_warning():
-                st.stop()
+        student_image = None
+        if method == "📁 Galeriden Seç":
+            uf = st.file_uploader("Öğrenci sınav kağıdı",
+                                   type=["png","jpg","jpeg"], key="sk_gallery")
+            if uf:
+                student_image = Image.open(uf).convert("RGB")
+        else:
+            cam = st.camera_input("Kağıdı hizalayın ve çekin", key="sk_cam")
+            if cam:
+                student_image = Image.open(cam).convert("RGB")
 
-            if st.button("🤖 Yapay Zeka ile Yükle ve Tanı", type="primary", use_container_width=True):
-                with st.spinner("Gemini AI öğrenci kimliğini kağıttan okuyor..."):
-                    id_result = read_student_identity(api_key, student_image)
-
-                if not id_result.get("success"):
-                    st.error(f"Hata: {id_result.get('error')}")
+        if student_image:
+            st.markdown("---")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                st.image(student_image, use_container_width=True, caption="Yüklenen görsel")
+            with c2:
+                st.info("🤖 Butona basınca AI kağıttaki öğrenci bilgilerini okuyacak ve sisteme kaydedecektir.")
+                if not api_key:
+                    _api_warning()
                 else:
-                    name    = id_result.get("name", "Bilinmeyen Öğrenci").strip()
-                    no      = id_result.get("no", "0").strip()
-                    s_class = id_result.get("class", cfg["grade"]).strip()
+                    if st.button("🤖 Yükle ve Tanı", type="primary",
+                                  use_container_width=True, key="btn_sk_upload"):
+                        with st.spinner("Gemini AI kimliği okuyor..."):
+                            id_r = read_student_identity(api_key, student_image)
 
-                    # Numara çakışmasını önle
-                    if not no or no == "0":
-                        no = str(len(st.session_state.student_records) + 1001)
+                        if not id_r.get("success"):
+                            st.error(f"Hata: {id_r.get('error')}")
+                        else:
+                            name  = id_r.get("name","Bilinmeyen Öğrenci").strip()
+                            no    = id_r.get("no","0").strip()
+                            scls  = id_r.get("class", cfg["grade"]).strip()
+                            branch = cfg.get("branch","")
 
-                    # Branş'ı sınıf config'den al
-                    branch = cfg.get("branch", "")
+                            if not no or no == "0":
+                                no = str(len(st.session_state.student_records) + 1001)
 
-                    # Kaydet
-                    st.session_state.student_records[no] = {
-                        "name": name,
-                        "no": no,
-                        "class": s_class,
-                        "branch": branch,
-                        "status": "Bekliyor",
-                        "grades": {},
-                        "total_score": 0,
-                    }
-                    st.session_state.student_images[no] = student_image
+                            st.session_state.student_records[no] = {
+                                "name": name, "no": no,
+                                "class": scls, "branch": branch,
+                                "status": "Bekliyor",
+                                "grades": {}, "total_score": 0,
+                            }
+                            st.session_state.student_images[no] = student_image
+                            st.success(f"✅ **{name}** — No: {no} — {scls}-{branch}")
 
-                    st.success(f"""
-                    ✅ **Öğrenci başarıyla eklendi!**  
-                    👤 Ad Soyad: **{name}**  
-                    🔢 Numara: **{no}**  
-                    🏫 Sınıf: **{s_class}-{branch}**
-                    """)
-                    st.rerun()
-
-    # ── Yüklenen öğrenciler listesi ──
-    records = st.session_state.student_records
-    if records:
-        st.markdown("---")
-        st.markdown(f"### 📋 Sisteme Yüklenen Öğrenciler ({len(records)} kişi)")
-
-        for no, rec in sorted(records.items(), key=lambda x: (int(x[0]) if x[0].isdigit() else x[0])):
-            col_info, col_del = st.columns([5, 1])
-            with col_info:
-                st.markdown(
-                    f"{_status_badge(rec['status'])} &nbsp; "
-                    f"**{rec.get('name', '—')}** &nbsp;|&nbsp; No: `{no}` &nbsp;|&nbsp; "
-                    f"{rec.get('class', '')}–{rec.get('branch', '')}",
-                    unsafe_allow_html=True
-                )
-            with col_del:
-                st.markdown('<div class="delete-btn">', unsafe_allow_html=True)
-                if st.button("🗑️", key=f"del_{no}", help=f"{rec.get('name')} sil"):
-                    del st.session_state.student_records[no]
-                    st.session_state.student_images.pop(no, None)
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class='callout-info' style='margin-top:20px;'>
-            Henüz hiç öğrenci eklenmedi. Yukarıdan öğrenci kağıtlarını yükleyin.
-        </div>
-        """, unsafe_allow_html=True)
+        # ── Yüklenen öğrenci listesi ──
+        records = st.session_state.student_records
+        if records:
+            st.markdown("---")
+            st.markdown(f"#### 📋 Yüklenen Öğrenciler ({len(records)})")
+            for no in sorted(records.keys(),
+                              key=lambda x: (int(x) if x.isdigit() else x)):
+                rec = records[no]
+                rc1, rc2 = st.columns([6, 1])
+                with rc1:
+                    st.markdown(
+                        f"{_badge(rec['status'])} &nbsp; **{rec.get('name','—')}** &nbsp;|&nbsp;"
+                        f" No: `{no}` &nbsp;|&nbsp; {rec.get('class','')}–{rec.get('branch','')}",
+                        unsafe_allow_html=True)
+                with rc2:
+                    st.markdown('<div class="delete-btn">', unsafe_allow_html=True)
+                    if st.button("🗑️", key=f"del_{no}",
+                                  help=f"{rec.get('name')} kaydını sil"):
+                        del st.session_state.student_records[no]
+                        st.session_state.student_images.pop(no, None)
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class='callout-info' style='margin-top:20px;'>
+                Henüz öğrenci eklenmedi.
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ╔═══════════════════════════════════════════════════════╗
 # ║  TAB 3 — AI DEĞERLENDİRME                            ║
 # ╚═══════════════════════════════════════════════════════╝
-elif active == "ai_degerlendirme":
-    st.markdown("## 🧠 Yapay Zeka Değerlendirme")
-
+with tab_ai:
+    st.markdown("### 🧠 Yapay Zeka Değerlendirme")
     cfg     = st.session_state.exam_config
     records = st.session_state.student_records
 
     if not cfg.get("key_saved"):
-        st.markdown("<div class='callout-warn'>⚠️ Önce Cevap Anahtarı sekmesinden cevap anahtarı yükleyin!</div>", unsafe_allow_html=True)
-        st.stop()
-
-    if not records:
-        st.markdown("<div class='callout-warn'>⚠️ Sisteme henüz öğrenci eklenmedi. Sınav Kağıdı sekmesinden öğrencileri ekleyin!</div>", unsafe_allow_html=True)
-        st.stop()
-
-    if not _api_warning():
-        st.stop()
-
-    # ── Tümünü Değerlendir butonu ──
-    bekleyen = [no for no, r in records.items() if r["status"] == "Bekliyor"]
-    if bekleyen:
-        st.markdown(f"**{len(bekleyen)} öğrenci** değerlendirilmeyi bekliyor.")
-        if st.button(f"🤖 Tüm Bekleyen Öğrencileri Değerlendir ({len(bekleyen)} kişi)",
-                     type="primary", use_container_width=True):
-            progress = st.progress(0, text="Değerlendirme başlıyor...")
-            for i, no in enumerate(bekleyen):
-                rec = records[no]
-                img = st.session_state.student_images.get(no)
-                if img is None:
-                    continue
-                progress.progress((i + 1) / len(bekleyen),
+        st.markdown("<div class='callout-warn'>⚠️ Önce Cevap Anahtarı sekmesinden cevap anahtarı yükleyin!</div>",
+                    unsafe_allow_html=True)
+    elif not records:
+        st.markdown("<div class='callout-warn'>⚠️ Öğrenci eklenmedi. Sınav Kağıdı sekmesinden ekleyin!</div>",
+                    unsafe_allow_html=True)
+    elif not _api_warning():
+        pass
+    else:
+        # ── Tümünü değerlendir ──
+        bekleyen = [n for n,r in records.items() if r["status"]=="Bekliyor"]
+        if bekleyen:
+            st.markdown(f"**{len(bekleyen)} öğrenci** değerlendirilmeyi bekliyor.")
+            if st.button(f"🤖 Tüm Bekleyen Öğrencileri Değerlendir ({len(bekleyen)})",
+                          type="primary", use_container_width=True, key="btn_eval_all"):
+                prog = st.progress(0, text="Başlıyor...")
+                for i, no in enumerate(bekleyen):
+                    rec = records[no]
+                    img = st.session_state.student_images.get(no)
+                    if not img:
+                        continue
+                    prog.progress((i+1)/len(bekleyen),
                                    text=f"Değerlendiriliyor: {rec['name']} ({i+1}/{len(bekleyen)})")
-
-                result = evaluate_student_paper(
-                    api_key,
-                    cfg["answer_key_images"],
-                    img,
-                    cfg.get("questions", {})
-                )
-
-                if result.get("success"):
-                    grades_raw = result.get("grades", {})
-                    total = result.get("total_score", sum(g.get("score", 0) for g in grades_raw.values()))
-                    st.session_state.student_records[no]["grades"] = grades_raw
-                    st.session_state.student_records[no]["total_score"] = total
-                    st.session_state.student_records[no]["status"] = "Değerlendirildi"
-
-            progress.empty()
-            st.success("✅ Tüm öğrenciler değerlendirildi! Şimdi tek tek inceleyip onaylayabilirsiniz.")
-            st.rerun()
-
-    st.markdown("---")
-
-    # ── Öğrenci listesi + Detay paneli ──
-    sorted_nos = sorted(records.keys(),
-                        key=lambda x: (int(x) if x.isdigit() else x))
-
-    # Aktif öğrenci session state
-    if "selected_student_no" not in st.session_state:
-        st.session_state.selected_student_no = sorted_nos[0] if sorted_nos else None
-
-    col_list, col_detail = st.columns([1, 2])
-
-    # Sol: Öğrenci listesi
-    with col_list:
-        st.markdown("**Öğrenci Listesi**")
-        for no in sorted_nos:
-            rec = records[no]
-            is_active = (no == st.session_state.selected_student_no)
-            card_cls = "student-card active" if is_active else "student-card"
-
-            # HTML kart ama tıklama için buton
-            if st.button(
-                f"{rec.get('name', '—')} | No: {no}\n{rec['status']}",
-                key=f"sel_{no}",
-                use_container_width=True,
-                type="primary" if is_active else "secondary"
-            ):
-                st.session_state.selected_student_no = no
+                    res = evaluate_student_paper(api_key, cfg["answer_key_images"],
+                                                  img, cfg.get("questions",{}))
+                    if res.get("success"):
+                        grd  = res.get("grades",{})
+                        tot  = res.get("total_score",
+                                        sum(g.get("score",0) for g in grd.values()))
+                        st.session_state.student_records[no]["grades"]      = grd
+                        st.session_state.student_records[no]["total_score"] = tot
+                        st.session_state.student_records[no]["status"]      = "Değerlendirildi"
+                prog.empty()
+                st.success("✅ Tüm öğrenciler değerlendirildi!")
                 st.rerun()
 
-    # Sağ: Detay paneli
-    with col_detail:
-        sel_no = st.session_state.selected_student_no
-        if sel_no and sel_no in records:
-            rec = records[sel_no]
-            img = st.session_state.student_images.get(sel_no)
+        st.markdown("---")
 
-            st.markdown(f"### 👤 {rec.get('name', '—')}")
-            st.markdown(
-                f"No: **{sel_no}** &nbsp;|&nbsp; "
-                f"Sınıf: **{rec.get('class', '')}–{rec.get('branch', '')}** &nbsp;|&nbsp; "
-                f"{_status_badge(rec['status'])}",
-                unsafe_allow_html=True
-            )
+        sorted_nos = sorted(records.keys(),
+                            key=lambda x: (int(x) if x.isdigit() else x))
 
-            # Değerlendir butonu (tek öğrenci)
-            if rec["status"] == "Bekliyor":
-                if img and st.button("🤖 Bu Öğrenciyi Değerlendir", use_container_width=True):
-                    with st.spinner(f"{rec['name']} değerlendiriliyor..."):
-                        result = evaluate_student_paper(
-                            api_key,
-                            cfg["answer_key_images"],
-                            img,
-                            cfg.get("questions", {})
-                        )
-                    if result.get("success"):
-                        grades_raw = result.get("grades", {})
-                        total = result.get("total_score", sum(g.get("score", 0) for g in grades_raw.values()))
-                        st.session_state.student_records[sel_no]["grades"] = grades_raw
-                        st.session_state.student_records[sel_no]["total_score"] = total
-                        st.session_state.student_records[sel_no]["status"] = "Değerlendirildi"
-                        st.success("✅ Değerlendirme tamamlandı!")
-                        st.rerun()
+        if "selected_no" not in st.session_state:
+            st.session_state.selected_no = sorted_nos[0] if sorted_nos else None
+
+        col_list, col_det = st.columns([1, 2])
+
+        # ── Sol: Öğrenci listesi ──
+        with col_list:
+            st.markdown("**Öğrenciler**")
+            for no in sorted_nos:
+                rec = records[no]
+                is_sel = (no == st.session_state.selected_no)
+                btn_t  = "primary" if is_sel else "secondary"
+                status_icon = {"Onaylandı":"✅","Değerlendirildi":"🔵","Bekliyor":"⏳"}.get(rec["status"],"⏳")
+                if st.button(
+                    f"{status_icon} {rec.get('name','—')}\nNo: {no}",
+                    key=f"sel_{no}", type=btn_t, use_container_width=True
+                ):
+                    st.session_state.selected_no = no
+                    st.rerun()
+
+        # ── Sağ: Detay ──
+        with col_det:
+            sel = st.session_state.selected_no
+            if sel and sel in records:
+                rec = records[sel]
+                img = st.session_state.student_images.get(sel)
+
+                st.markdown(f"#### 👤 {rec.get('name','—')}")
+                st.markdown(
+                    f"No: **{sel}** | Sınıf: **{rec.get('class','')}–{rec.get('branch','')}** | "
+                    f"{_badge(rec['status'])}",
+                    unsafe_allow_html=True)
+
+                # Değerlendir butonu
+                if rec["status"] == "Bekliyor":
+                    if img:
+                        if st.button("🤖 Bu Öğrenciyi Değerlendir",
+                                      use_container_width=True, key=f"eval_{sel}"):
+                            with st.spinner(f"{rec['name']} değerlendiriliyor..."):
+                                res = evaluate_student_paper(
+                                    api_key, cfg["answer_key_images"],
+                                    img, cfg.get("questions",{}))
+                            if res.get("success"):
+                                grd = res.get("grades",{})
+                                tot = res.get("total_score",
+                                               sum(g.get("score",0) for g in grd.values()))
+                                st.session_state.student_records[sel]["grades"]      = grd
+                                st.session_state.student_records[sel]["total_score"] = tot
+                                st.session_state.student_records[sel]["status"]      = "Değerlendirildi"
+                                st.success("✅ Değerlendirme tamamlandı!")
+                                st.rerun()
+                            else:
+                                st.error(f"Hata: {res.get('error')}")
                     else:
-                        st.error(f"Hata: {result.get('error')}")
-                elif not img:
-                    st.warning("Bu öğrenciye ait görsel bulunamadı.")
+                        st.warning("Bu öğrenciye ait görsel bulunamadı.")
 
-            # Kağıt görseli
-            if img:
-                with st.expander("📄 Öğrenci Kağıdı Görseli", expanded=False):
-                    st.image(img, use_container_width=True)
+                # Kağıt görseli
+                if img:
+                    with st.expander("📄 Öğrenci Kağıdı"):
+                        st.image(img, use_container_width=True)
 
-            # Puan tablosu
-            grades = rec.get("grades", {})
-            if grades:
-                st.markdown("#### 📊 Soru Bazlı Puanlar")
+                # Puan tablosu
+                grades = rec.get("grades",{})
+                if grades:
+                    st.markdown("#### 📊 Soru Bazlı Puanlar")
+                    total_s, total_m = 0, 0
 
-                total_score = 0
-                total_max   = 0
+                    for qid in sorted(grades.keys(), key=lambda x: int(x) if x.isdigit() else x):
+                        g      = grades[qid]
+                        score  = g.get("score", 0)
+                        max_sc = g.get("max_score",
+                                        cfg.get("questions",{}).get(qid,{}).get("max_score","?"))
+                        fb     = g.get("feedback","")
+                        st_ans = g.get("student_answer","")
+                        total_s += score
+                        if isinstance(max_sc,(int,float)):
+                            total_m += max_sc
 
-                for qid in sorted(grades.keys(), key=lambda x: int(x) if x.isdigit() else x):
-                    g = grades[qid]
-                    score     = g.get("score", 0)
-                    max_score = g.get("max_score", cfg.get("questions", {}).get(qid, {}).get("max_score", "?"))
-                    feedback  = g.get("feedback", "")
-                    st_ans    = g.get("student_answer", "")
+                        pct   = int(score/max_sc*100) if isinstance(max_sc,(int,float)) and max_sc else 0
+                        color = "#34d399" if pct>=75 else ("#fbbf24" if pct>=40 else "#f87171")
 
-                    total_score += score
-                    if isinstance(max_score, (int, float)):
-                        total_max += max_score
-
-                    pct = int(score / max_score * 100) if isinstance(max_score, (int, float)) and max_score > 0 else 0
-                    color = "#34d399" if pct >= 75 else ("#fbbf24" if pct >= 40 else "#f87171")
-
-                    st.markdown(f"""
-                    <div class='premium-card' style='margin-bottom:10px; padding:14px 18px;'>
-                        <div style='display:flex; justify-content:space-between; align-items:center;'>
-                            <span style='font-weight:700; color:#e8eaf6;'>Soru {qid}</span>
-                            <span style='font-size:1.4rem; font-weight:800; color:{color};'>{score} / {max_score}</span>
+                        st.markdown(f"""
+                        <div class='premium-card' style='padding:12px 16px; margin-bottom:8px;'>
+                            <div style='display:flex;justify-content:space-between;align-items:center;'>
+                                <span style='font-weight:700;'>Soru {qid}</span>
+                                <span style='font-size:1.3rem;font-weight:800;color:{color};'>{score} / {max_sc}</span>
+                            </div>
+                            {"<div style='color:#94a3b8;font-size:0.82rem;margin-top:4px;'>📝 " + st_ans + "</div>" if st_ans else ""}
+                            {"<div style='color:#64748b;font-size:0.82rem;margin-top:4px;'>🤖 " + fb + "</div>" if fb else ""}
                         </div>
-                        {"<div style='color:#94a3b8; font-size:0.82rem; margin-top:4px;'>📝 Öğrenci: " + st_ans + "</div>" if st_ans else ""}
-                        {"<div style='color:#64748b; font-size:0.82rem; margin-top:4px;'>🤖 " + feedback + "</div>" if feedback else ""}
+                        """, unsafe_allow_html=True)
+
+                    # Toplam
+                    tc = "#34d399" if total_m>0 and total_s/total_m>=0.5 else "#f87171"
+                    st.markdown(f"""
+                    <div style='background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);
+                                border-radius:12px;padding:14px 20px;text-align:center;margin-top:8px;'>
+                        <div style='color:#94a3b8;font-size:0.8rem;text-transform:uppercase;letter-spacing:.06em;'>
+                            TOPLAM PUAN</div>
+                        <span style='font-size:2.4rem;font-weight:800;color:{tc};'>{total_s}</span>
+                        <span style='color:#64748b;'> / {total_m}</span>
                     </div>
                     """, unsafe_allow_html=True)
 
-                # Toplam
-                t_color = "#34d399" if (total_max > 0 and total_score / total_max >= 0.5) else "#f87171"
-                st.markdown(f"""
-                <div style='background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3);
-                            border-radius:12px; padding:14px 20px; text-align:center; margin-top:10px;'>
-                    <span style='color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.06em;'>TOPLAM PUAN</span><br>
-                    <span style='font-size:2.5rem; font-weight:800; color:{t_color};'>{total_score}</span>
-                    <span style='font-size:1.1rem; color:#64748b;'> / {total_max}</span>
-                </div>
-                """, unsafe_allow_html=True)
+                    if rec["status"] == "Değerlendirildi":
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.markdown('<div class="approve-btn">', unsafe_allow_html=True)
+                        if st.button("✅ Değerlendirmeyi Onayla ve Kaydet",
+                                      key=f"appr_{sel}", use_container_width=True):
+                            st.session_state.student_records[sel]["status"]      = "Onaylandı"
+                            st.session_state.student_records[sel]["total_score"] = total_s
+                            st.success(f"✅ {rec['name']} onaylandı! Toplam: {total_s}/{total_m}")
+                            idx = sorted_nos.index(sel)
+                            if idx+1 < len(sorted_nos):
+                                st.session_state.selected_no = sorted_nos[idx+1]
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
 
-                # Öğretmen onayı
-                if rec["status"] == "Değerlendirildi":
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown('<div class="approve-btn">', unsafe_allow_html=True)
-                    if st.button("✅ Değerlendirmeyi Onayla ve Kaydet",
-                                 key=f"approve_{sel_no}", use_container_width=True):
-                        st.session_state.student_records[sel_no]["status"] = "Onaylandı"
-                        st.session_state.student_records[sel_no]["total_score"] = total_score
-                        st.success(f"✅ {rec['name']} onaylandı! Toplam: {total_score}/{total_max}")
-                        # Bir sonraki öğrenciye geç
-                        idx = sorted_nos.index(sel_no)
-                        if idx + 1 < len(sorted_nos):
-                            st.session_state.selected_student_no = sorted_nos[idx + 1]
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                elif rec["status"] == "Onaylandı":
-                    st.markdown("""
-                    <div class='callout-success'>
-                        ✅ Bu öğrencinin değerlendirmesi onaylandı ve not çizelgesine eklendi.
-                    </div>
-                    """, unsafe_allow_html=True)
+                    elif rec["status"] == "Onaylandı":
+                        st.markdown("<div class='callout-success'>✅ Bu öğrenci onaylandı.</div>",
+                                    unsafe_allow_html=True)
 
 
 # ╔═══════════════════════════════════════════════════════╗
 # ║  TAB 4 — NOT ÇİZELGESİ                               ║
 # ╚═══════════════════════════════════════════════════════╝
-elif active == "not_cizelgesi":
-    st.markdown("## 📋 Not Çizelgesi")
-
+with tab_nc:
+    st.markdown("### 📋 Not Çizelgesi")
     records = st.session_state.student_records
-    onaylanan = {no: r for no, r in records.items() if r.get("status") == "Onaylandı"}
+    onaylanan = {n:r for n,r in records.items() if r.get("status")=="Onaylandı"}
 
     if not onaylanan:
         st.markdown("""
         <div class='callout-info'>
-            📭 Henüz onaylanmış öğrenci kaydı bulunmamaktadır.<br>
-            AI Değerlendirme sekmesinden öğrencileri değerlendirip onaylayın.
+            📭 Henüz onaylanmış öğrenci kaydı yok.<br>
+            AI Değerlendirme sekmesinden öğrencileri onaylayın.
         </div>
         """, unsafe_allow_html=True)
-        st.stop()
-
-    st.markdown(f"""
-    <div class='callout-success'>
-        ✅ <strong>{len(onaylanan)} öğrenci</strong> onaylandı. Numara sırasına göre listelenmiştir.
-    </div>
-    """, unsafe_allow_html=True)
-
-    df = get_approved_grades_dataframe()
-
-    if not df.empty:
-        # ── Özet istatistikler ──
-        questions = st.session_state.exam_config.get("questions", {})
-        total_max = sum(q.get("max_score", 0) for q in questions.values()) if questions else 0
-        avg = df["Toplam"].mean() if "Toplam" in df.columns else 0
-
-        kpi1, kpi2, kpi3 = st.columns(3)
-        with kpi1:
-            st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>Toplam Öğrenci</div>
-                <div class='metric-value'>{len(df)}</div>
-            </div>""", unsafe_allow_html=True)
-        with kpi2:
-            st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>Sınıf Ortalaması</div>
-                <div class='metric-value'>{avg:.1f}</div>
-            </div>""", unsafe_allow_html=True)
-        with kpi3:
-            pct = (avg / total_max * 100) if total_max > 0 else 0
-            st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>Ortalama Başarı %</div>
-                <div class='metric-value'>%{pct:.0f}</div>
-            </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ── HTML Tablosu (yatay kaydırmalı, mobil uyumlu) ──
-        html_table = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
-        for col in df.columns:
-            html_table += f"<th>{col}</th>"
-        html_table += "</tr></thead><tbody>"
-
-        for _, row in df.iterrows():
-            html_table += "<tr>"
-            for col in df.columns:
-                val = row[col]
-                if col == "Toplam":
-                    pct_s = (val / total_max * 100) if total_max > 0 else 0
-                    color = "#34d399" if pct_s >= 50 else "#f87171"
-                    html_table += f"<td style='font-weight:700; color:{color};'>{val}</td>"
-                else:
-                    html_table += f"<td>{val}</td>"
-            html_table += "</tr>"
-
-        html_table += "</tbody></table></div>"
-        st.markdown(html_table, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ── CSV İndir ──
-        csv = df.to_csv(index=False).encode("utf-8")
+    else:
         cfg = st.session_state.exam_config
-        st.download_button(
-            label="📥 Not Çizelgesini CSV Olarak İndir",
-            data=csv,
-            file_name=f"notlar_{cfg.get('grade', '')}_{cfg.get('branch', '')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        questions = cfg.get("questions",{})
+        total_max = sum(q.get("max_score",0) for q in questions.values()) if questions else 0
+
+        df = get_approved_grades_dataframe()
+        avg = df["Toplam"].mean() if not df.empty and "Toplam" in df.columns else 0
+
+        st.markdown(f"""
+        <div class='callout-success'>
+            ✅ <strong>{len(onaylanan)} öğrenci</strong> onaylandı — numara sırasıyla listeleniyor.
+        </div>
+        """, unsafe_allow_html=True)
+
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.markdown(f"<div class='metric-card'><div class='metric-label'>Öğrenci Sayısı</div><div class='metric-value'>{len(df)}</div></div>", unsafe_allow_html=True)
+        with k2:
+            st.markdown(f"<div class='metric-card'><div class='metric-label'>Sınıf Ortalaması</div><div class='metric-value'>{avg:.1f}</div></div>", unsafe_allow_html=True)
+        with k3:
+            pct = (avg/total_max*100) if total_max>0 else 0
+            st.markdown(f"<div class='metric-card'><div class='metric-label'>Ortalama Başarı</div><div class='metric-value'>%{pct:.0f}</div></div>", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if not df.empty:
+            html = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
+            for c in df.columns:
+                html += f"<th>{c}</th>"
+            html += "</tr></thead><tbody>"
+            for _, row in df.iterrows():
+                html += "<tr>"
+                for c in df.columns:
+                    v = row[c]
+                    if c == "Toplam":
+                        p = (v/total_max*100) if total_max>0 else 0
+                        clr = "#34d399" if p>=50 else "#f87171"
+                        html += f"<td style='font-weight:700;color:{clr};'>{v}</td>"
+                    else:
+                        html += f"<td>{v}</td>"
+                html += "</tr>"
+            html += "</tbody></table></div>"
+            st.markdown(html, unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            csv = df.to_csv(index=False).encode("utf-8")
+            fn  = f"notlar_{cfg.get('grade','')}_{cfg.get('branch','')}.csv"
+            st.download_button("📥 Not Çizelgesini CSV Olarak İndir",
+                                data=csv, file_name=fn, mime="text/csv",
+                                use_container_width=True)
