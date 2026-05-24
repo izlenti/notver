@@ -117,7 +117,7 @@ def read_answer_key(api_key, answer_key_images):
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
         contents = [ANSWER_KEY_PROMPT] + answer_key_images
         response = model.generate_content(
@@ -150,7 +150,7 @@ def read_student_identity(api_key, student_image):
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
         response = model.generate_content(
             contents=[IDENTITY_PROMPT, student_image],
@@ -197,7 +197,7 @@ def evaluate_student_paper(api_key, answer_key_images, student_paper, questions_
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-2.0-flash",
             system_instruction=EVALUATION_SYSTEM_PROMPT
         )
 
