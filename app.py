@@ -6,6 +6,13 @@ import os
 import json
 import io
 
+# PDF desteği (PyMuPDF)
+try:
+    import fitz  # PyMuPDF
+    PDF_SUPPORTED = True
+except ImportError:
+    PDF_SUPPORTED = False
+
 from utils import (
     initialize_session_state,
     get_approved_grades_dataframe,
@@ -61,6 +68,38 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+# ─── PDF sayfalarını PIL Image listesine çevir ───
+def _pdf_to_images(file_bytes: bytes) -> list:
+    """PDF dosyasının her sayfasını yüksek çözünürlüklü PIL Image'a çevirir."""
+    if not PDF_SUPPORTED:
+        st.error("⚠️ PDF desteği yüklü değil. Lütfen PNG/JPG kullanın.")
+        return []
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    images = []
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        mat  = fitz.Matrix(2.0, 2.0)  # 2× zoom → daha net AI okuması
+        pix  = page.get_pixmap(matrix=mat)
+        img  = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        images.append(img)
+    doc.close()
+    return images
+
+def _load_uploaded_files(files) -> list:
+    """
+    Dosya listesini (görsel veya PDF) PIL Image listesine çevirir.
+    Her PDF dosyası sayfa sayfa açılır.
+    """
+    images = []
+    for f in files:
+        name = f.name.lower()
+        if name.endswith(".pdf"):
+            pages = _pdf_to_images(f.read())
+            images.extend(pages)
+        else:
+            images.append(Image.open(f).convert("RGB"))
+    return images
 
 # ─── API Key uyarısı (Secrets'ta yoksa) ───
 def _api_warning():
@@ -126,20 +165,30 @@ with tab_ca:
     st.markdown("---")
 
     # ── Dosya yükleme ──
+    accept_types = ["png","jpg","jpeg","pdf"] if PDF_SUPPORTED else ["png","jpg","jpeg"]
+    type_label   = "PNG, JPG veya PDF" if PDF_SUPPORTED else "PNG, JPG"
+
     uploaded_keys = st.file_uploader(
-        "Cevap anahtarı görseli (PNG, JPG) — birden fazla sayfa seçilebilir",
-        type=["png","jpg","jpeg"],
+        f"Cevap anahtarı ({type_label}) — birden fazla dosya/sayfa seçilebilir",
+        type=accept_types,
         accept_multiple_files=True,
         key="uploader_answer_key"
     )
 
     if uploaded_keys:
-        st.markdown(f"**{len(uploaded_keys)} sayfa yüklendi.** Önizleme:")
+        # PDF'leri sayfalara böl, görselleri doğrudan yükle
         pil_images = []
-        prev_cols = st.columns(min(len(uploaded_keys), 4))
-        for i, f in enumerate(uploaded_keys):
-            img = Image.open(f).convert("RGB")
-            pil_images.append(img)
+        for f in uploaded_keys:
+            if f.name.lower().endswith(".pdf"):
+                pages = _pdf_to_images(f.read())
+                pil_images.extend(pages)
+                st.info(f"📄 **{f.name}** → {len(pages)} sayfa PDF okundu")
+            else:
+                pil_images.append(Image.open(f).convert("RGB"))
+
+        st.markdown(f"**Toplam {len(pil_images)} sayfa yüklendi.** Önizleme:")
+        prev_cols = st.columns(min(len(pil_images), 4))
+        for i, img in enumerate(pil_images):
             with prev_cols[i % 4]:
                 st.image(img, use_container_width=True, caption=f"Sayfa {i+1}")
 
@@ -244,15 +293,29 @@ with tab_sk:
 
         st.write("Öğrenci kağıtlarını **kameradan** veya **galeriden** yükleyin. AI adı, numarayı, sınıfı otomatik okur.")
 
-        method = st.radio("Yükleme yöntemi:", ["📁 Galeriden Seç", "📷 Kameradan Çek"],
+        method = st.radio("Yükleme yöntemi:",
+                          ["📁 Galeriden Seç (Görsel veya PDF)", "📷 Kameradan Çek"],
                           horizontal=True, key="sk_method")
 
         student_image = None
-        if method == "📁 Galeriden Seç":
-            uf = st.file_uploader("Öğrenci sınav kağıdı",
-                                   type=["png","jpg","jpeg"], key="sk_gallery")
+        student_extra_pages = []  # Çok sayfalı PDF için ek sayfalar
+
+        if "Galeri" in method:
+            sk_types = ["png","jpg","jpeg","pdf"] if PDF_SUPPORTED else ["png","jpg","jpeg"]
+            uf = st.file_uploader(
+                "Öğrenci sınav kağıdı (PNG, JPG veya PDF — tek öğrenci)",
+                type=sk_types, key="sk_gallery"
+            )
             if uf:
-                student_image = Image.open(uf).convert("RGB")
+                if uf.name.lower().endswith(".pdf"):
+                    pages = _pdf_to_images(uf.read())
+                    if pages:
+                        student_image = pages[0]
+                        student_extra_pages = pages[1:]  # Geri kalan sayfalar
+                        if len(pages) > 1:
+                            st.info(f"PDF {len(pages)} sayfa → İlk sayfa kimlik okuma için, tüm sayfalar değerlendirme için kullanılacak.")
+                else:
+                    student_image = Image.open(uf).convert("RGB")
         else:
             cam = st.camera_input("Kağıdı hizalayın ve çekin", key="sk_cam")
             if cam:
@@ -276,22 +339,28 @@ with tab_sk:
                         if not id_r.get("success"):
                             st.error(f"Hata: {id_r.get('error')}")
                         else:
-                            name  = id_r.get("name","Bilinmeyen Öğrenci").strip()
-                            no    = id_r.get("no","0").strip()
-                            scls  = id_r.get("class", cfg["grade"]).strip()
+                            name   = id_r.get("name","Bilinmeyen Öğrenci").strip()
+                            no     = id_r.get("no","0").strip()
+                            scls   = id_r.get("class", cfg["grade"]).strip()
                             branch = cfg.get("branch","")
 
                             if not no or no == "0":
                                 no = str(len(st.session_state.student_records) + 1001)
+
+                            # Çok sayfalı öğrenci kağıdı → tüm sayfaları birleştir
+                            all_pages = [student_image] + student_extra_pages
 
                             st.session_state.student_records[no] = {
                                 "name": name, "no": no,
                                 "class": scls, "branch": branch,
                                 "status": "Bekliyor",
                                 "grades": {}, "total_score": 0,
+                                "page_count": len(all_pages),
                             }
-                            st.session_state.student_images[no] = student_image
-                            st.success(f"✅ **{name}** — No: {no} — {scls}-{branch}")
+                            # İlk sayfa önizleme için, tüm sayfalar değerlendirme için
+                            st.session_state.student_images[no]        = student_image
+                            st.session_state.student_all_pages[no]     = all_pages
+                            st.success(f"✅ **{name}** — No: {no} — {scls}-{branch} ({len(all_pages)} sayfa)")
 
         # ── Yüklenen öğrenci listesi ──
         records = st.session_state.student_records
@@ -354,8 +423,15 @@ with tab_ai:
                         continue
                     prog.progress((i+1)/len(bekleyen),
                                    text=f"Değerlendiriliyor: {rec['name']} ({i+1}/{len(bekleyen)})")
+                    # Tüm sayfaları kullan (PDF için çok sayfa olabilir)
+                    all_pages = st.session_state.student_all_pages.get(no)
+                    if not all_pages:
+                        all_pages = [img] if img else []
+                    if not all_pages:
+                        continue
                     res = evaluate_student_paper(api_key, cfg["answer_key_images"],
-                                                  img, cfg.get("questions",{}))
+                                                  all_pages[0] if len(all_pages)==1 else all_pages[0],
+                                                  cfg.get("questions",{}))
                     if res.get("success"):
                         grd  = res.get("grades",{})
                         tot  = res.get("total_score",
@@ -411,9 +487,10 @@ with tab_ai:
                         if st.button("🤖 Bu Öğrenciyi Değerlendir",
                                       use_container_width=True, key=f"eval_{sel}"):
                             with st.spinner(f"{rec['name']} değerlendiriliyor..."):
+                                all_pages = st.session_state.student_all_pages.get(sel, [img])
                                 res = evaluate_student_paper(
                                     api_key, cfg["answer_key_images"],
-                                    img, cfg.get("questions",{}))
+                                    all_pages, cfg.get("questions",{}))
                             if res.get("success"):
                                 grd = res.get("grades",{})
                                 tot = res.get("total_score",

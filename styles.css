@@ -3,31 +3,63 @@
 /* ── Google Fonts ── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
 
-/* ── Hide ALL Streamlit chrome ── */
+/* ── Hide ALL Streamlit chrome & badges ── */
 [data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stToolbarActions"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stBottom"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebar"],
+[data-testid="stAppDeployButton"],
 header,
 #MainMenu,
 footer,
-[data-testid="stToolbar"],
-[data-testid="stDecoration"],
-[data-testid="stStatusWidget"],
-[data-testid="collapsedControl"],
-[data-testid="stSidebar"],
+
+/* Viewer badge variants */
+.viewerBadge_container__r5tak,
+.viewerBadge_link__qRIco,
 div[class*="viewerBadge"],
-div[class*="stDecoration"],
+div[class*="ViewerBadge"],
+span[class*="viewerBadge"],
 .viewerBadge,
-.css-1dp5vir,
-.css-14xtw13,
+
+/* Streamlit decoration / watermark */
+div[class*="stDecoration"],
+div[class*="Decoration"],
+#stDecoration,
+
+/* Generic Streamlit CSS class patterns (emotion cache) */
+.css-1dp5vir, .css-14xtw13, .css-cio0dv, .css-6q9sum,
+.css-164nlkn, .css-1rs6os, .css-10pw50,
+
+/* Iframes and links to streamlit */
 iframe[title*="streamlit"],
 iframe[title*="Streamlit"],
+iframe[src*="streamlit"],
 a[href*="streamlit.io"],
 a[href*="github.com/streamlit"],
-[data-testid="stBottom"],
+
+/* The purple share button and red crown (bottom-right) */
+button[title*="Share"],
+button[aria-label*="Share"],
+button[aria-label*="share"],
+[data-testid="baseButton-share"],
+[data-testid="shareButton"],
+
+/* Streamlit community cloud overlay buttons */
+div[class*="StatusWidget"],
+div[class*="statusWidget"],
+div[class*="toolbar-wrapper"],
+[class*="AppDeployButton"],
+
 section[data-testid="stSidebar"] {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
     width: 0 !important;
+
     overflow: hidden !important;
     pointer-events: none !important;
 }

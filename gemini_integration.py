@@ -178,15 +178,21 @@ def read_student_identity(api_key, student_image):
         return {"success": False, "error": f"Gemini API hatası: {str(e)}"}
 
 
-def evaluate_student_paper(api_key, answer_key_images, student_image, questions_dict):
+def evaluate_student_paper(api_key, answer_key_images, student_paper, questions_dict):
     """
     Öğrencinin kağıdını cevap anahtarıyla karşılaştırarak puanlar.
     answer_key_images: list of PIL Image (cevap anahtarı sayfaları)
-    student_image: PIL Image (öğrenci kağıdı)
-    questions_dict: dict (soru yapısı - soru no → {title, max_score, correct_solution})
+    student_paper: PIL Image VEYA list of PIL Image (öğrenci kağıdı — tek veya çok sayfalı)
+    questions_dict: dict (soru yapısı)
     """
     if not api_key:
         return {"success": False, "error": "API anahtarı bulunamadı."}
+
+    # student_paper tek bir Image veya Image listesi olabilir
+    if isinstance(student_paper, list):
+        student_images = student_paper
+    else:
+        student_images = [student_paper]
 
     try:
         genai.configure(api_key=api_key)
@@ -195,26 +201,26 @@ def evaluate_student_paper(api_key, answer_key_images, student_image, questions_
             system_instruction=EVALUATION_SYSTEM_PROMPT
         )
 
-        # Soru yapısını metne dök
-        questions_text = "SINAV SORU YAPISI (Cevap anahtarından okunacak):\n"
+        questions_text = "SINAV SORU YAPISI:\n"
         for q_id, q_info in questions_dict.items():
             questions_text += f"- Soru {q_id}: Maksimum {q_info['max_score']} puan\n"
 
         prompt = f"""
-Sana {len(answer_key_images)} sayfalık CEVAP ANAHTARI ve 1 ÖĞRENCI KAĞIDI gönderiyorum.
+Sana {len(answer_key_images)} sayfalık CEVAP ANAHTARI ve {len(student_images)} sayfalık ÖĞRENCI KAĞIDI gönderiyorum.
 
 {questions_text}
 
 Lütfen:
 1. Cevap anahtarındaki her soruyu ve doğru çözümü analiz et.
-2. Öğrenci kağıdındaki her sorunun çözümünü oku.
+2. Öğrenci kağıdındaki her sorunun çözümünü oku (OCR — el yazısını dahil).
 3. Her soruyu karşılaştırarak adil bir puan ver.
 4. JSON formatında döndür.
 
-GÖRSELLER SIRASI: Önce cevap anahtarı sayfaları, en son öğrenci kağıdı.
+GÖRSELLER SIRASI: Önce cevap anahtarı sayfaları ({len(answer_key_images)} sayfa), 
+sonra öğrenci kağıdı sayfaları ({len(student_images)} sayfa).
 """
 
-        contents = [prompt] + answer_key_images + [student_image]
+        contents = [prompt] + answer_key_images + student_images
         response = model.generate_content(
             contents=contents,
             generation_config={"response_mime_type": "application/json"}

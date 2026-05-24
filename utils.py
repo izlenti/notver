@@ -35,9 +35,13 @@ def initialize_session_state():
     if "student_records" not in st.session_state:
         st.session_state.student_records = {}
 
-    # Öğrenci görsel deposu (PIL Image, session_state'de büyük objeler ayrı key'de)
+    # Öğrenci görsel deposu (önizleme için ilk sayfa)
     if "student_images" not in st.session_state:
         st.session_state.student_images = {}
+
+    # Öğrenci tüm sayfalar deposu (değerlendirme için)
+    if "student_all_pages" not in st.session_state:
+        st.session_state.student_all_pages = {}
 
 
 def get_approved_grades_dataframe():
