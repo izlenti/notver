@@ -136,44 +136,45 @@ if st.sidebar.button("🔄 Verileri Sıfırla"):
         del st.session_state[key]
     st.rerun()
 
-# 6. Mobil / Masaüstü Arayüz Navigasyonu (Session State Tabanlı Alt/Üst Bar)
+# 6. Mobil / Masaüstü Arayüz Navigasyonu (Windows 11 Görev Çubuğu Dock Tarzı)
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "cevap_anahtari"
 
+# Yüzen Dairesel İkon Menüsü (Windows Görev Çubuğu)
 st.markdown('<div class="nav-container-fixed">', unsafe_allow_html=True)
 col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
 with col_nav1:
     if st.button(
-        "📐 Cevap Anahtarı", 
+        "📐", 
         type="primary" if st.session_state.active_tab == "cevap_anahtari" else "secondary",
-        use_container_width=True,
+        help="Sınav & Cevap Anahtarı Tanımları",
         key="btn_nav_cevap"
     ):
         st.session_state.active_tab = "cevap_anahtari"
         st.rerun()
 with col_nav2:
     if st.button(
-        "📷 Kağıt Tarama", 
+        "📷", 
         type="primary" if st.session_state.active_tab == "ogrenci_tarama" else "secondary",
-        use_container_width=True,
+        help="Öğrenci Kağıdı Giriş & Tarama",
         key="btn_nav_tarama"
     ):
         st.session_state.active_tab = "ogrenci_tarama"
         st.rerun()
 with col_nav3:
     if st.button(
-        "🧠 Değerlendirme", 
+        "🧠", 
         type="primary" if st.session_state.active_tab == "ai_degerlendirme" else "secondary",
-        use_container_width=True,
+        help="Yapay Zeka Değerlendirme & Denetim",
         key="btn_nav_deger"
     ):
         st.session_state.active_tab = "ai_degerlendirme"
         st.rerun()
 with col_nav4:
     if st.button(
-        "📋 Not Defteri", 
+        "📋", 
         type="primary" if st.session_state.active_tab == "not_defteri" else "secondary",
-        use_container_width=True,
+        help="Not Defteri & Başarı Analizleri",
         key="btn_nav_defteri"
     ):
         st.session_state.active_tab = "not_defteri"
@@ -266,451 +267,465 @@ if st.session_state.active_tab == "cevap_anahtari":
 # ==================== VIEW 2: KAĞIT TARAMA ====================
 elif st.session_state.active_tab == "ogrenci_tarama":
     st.markdown("<h3 style='margin-bottom: 10px;'>📷 Öğrenci Kağıdı Giriş ve Kamera Tarama</h3>", unsafe_allow_html=True)
-    st.write("Öğrenci kağıtlarını telefonunuzun kamerasıyla anında çekerek veya galeriden topluca yükleyerek sisteme aktarabilirsiniz.")
+    st.write("Yapay zeka, kağıt üzerindeki **Adı-Soyadı, Okul Numarası ve Sınıfı/Şubesi** bilgilerini doğrudan kağıttan okuyacaktır. Önceden öğrenci tanımlamanıza veya listeden seçmenize gerek yoktur.")
     
-    # Sınıf/Şubeye göre öğrenci seçimi
-    student_ids = []
-    student_options = []
-    for s_id, record in st.session_state.student_records.items():
-        if selected_class == "Tüm Sınıflar" or record.get("class", "5-A") == selected_class:
-            student_ids.append(s_id)
-            status_icon = "✅" if record["status"] == "Onaylandı" else "⏳"
-            student_options.append(f"{status_icon} No: {s_id} - {record['name']} ({record.get('class', '5-A')})")
-
-    if not student_options:
-        st.warning(f"⚠️ `{selected_class}` şubesinde kayıtlı öğrenci bulunamadı. Lütfen sol menüden farklı bir şube seçin.")
-    else:
-        selected_student_idx = st.selectbox(
-            "Taranacak Öğrenciyi Seçin",
-            range(len(student_options)),
-            format_func=lambda x: student_options[x],
-            key="scan_student_select"
-        )
-        selected_student_id = student_ids[selected_student_idx]
-        student_record = st.session_state.student_records[selected_student_id]
-
-        st.markdown(f"##### 👤 Aktif Öğrenci: **{student_record['name']}** ({student_record['class']})")
-
-        # Görsel Giriş Kaynağı
-        st.markdown("<div style='background-color:#161824; padding:15px; border-radius:10px; border: 1px solid rgba(99, 102, 241, 0.15); margin-bottom:20px;'>", unsafe_allow_html=True)
-        input_source = st.radio(
-            "Giriş Yöntemi Seçin",
-            ["📷 Telefon Kamerası ile Fotoğraf Çek", "📤 Galeriden/Cihazdan Dosya Yükle", "✨ Hazır Örnek Görseli Kullan (Demo)"],
-            horizontal=True,
-            key=f"input_src_tarama_{selected_student_id}"
-        )
-        
-        active_image = None
-        if "Kamerası" in input_source:
-            camera_photo = st.camera_input("Kağıdı Kameraya Hizalayın", key=f"cam_tarama_{selected_student_id}")
-            if camera_photo:
-                active_image = Image.open(camera_photo)
-                st.session_state[f"custom_img_{selected_student_id}"] = active_image
-        elif "Dosya" in input_source:
-            file_photo = st.file_uploader("Kağıt Görseli Seçin", type=["png", "jpg", "jpeg"], key=f"file_tarama_{selected_student_id}")
-            if file_photo:
-                active_image = Image.open(file_photo)
-                st.session_state[f"custom_img_{selected_student_id}"] = active_image
-        elif "Hazır Örnek" in input_source:
-            active_image = get_student_solution_image(selected_student_id, "global")
-            st.session_state[f"custom_img_{selected_student_id}"] = active_image
-
+    # Yan yana iki seçenek (Kamera ve Dosya Yükleme)
+    scan_col1, scan_col2 = st.columns(2)
+    camera_photo = None
+    file_photo = None
+    
+    with scan_col1:
+        st.markdown("<div class='premium-card' style='text-align:center;'>", unsafe_allow_html=True)
+        st.markdown("<h5>📷 Telefon Kamerası ile Çek</h5>", unsafe_allow_html=True)
+        camera_photo = st.camera_input("Öğrenci Kağıdını Hizalayıp Çekin", key="cam_tarama_input")
         st.markdown("</div>", unsafe_allow_html=True)
-
-        if active_image:
-            st.image(active_image, use_container_width=True, caption=f"{student_record['name']} - Yüklenen/Çekilen Sınav Sayfası")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            if not api_key:
-                st.info("💡 Puanlamayı başlatmak için lütfen sol menüden Google Gemini API Anahtarınızı giriniz veya Secrets tanımını yapınız.")
-            else:
-                if st.button("🤖 Gemini AI ile Sayfayı Puanla ve Değerlendirmeye Gönder", key=f"btn_process_paper_{selected_student_id}"):
-                    with st.spinner("Gemini 1.5 Flash geometri şekillerini okuyor ve çözümleri analiz ediyor..."):
-                        ai_result = evaluate_entire_exam_page(
-                            api_key, 
-                            active_image, 
-                            st.session_state.exam_config["questions"]
-                        )
-                        
-                        if ai_result.get("success") and "grades" in ai_result:
-                            for q_id, q_res in ai_result["grades"].items():
-                                student_record["grades"][q_id] = {
-                                    "score_concept": q_res["score_concept"],
-                                    "score_steps": q_res["score_steps"],
-                                    "score_result": q_res["score_result"],
-                                    "score_total": q_res["score_total"],
-                                    "ai_feedback": q_res["ai_feedback"],
-                                    "student_solution": q_res.get("detected_text", "Okundu."),
-                                    "teacher_override": False,
-                                    "teacher_score": q_res["score_total"],
-                                    "ai_score_initial": q_res["score_total"]
-                                }
-                            st.success(f"🎉 {student_record['name']} kağıdındaki tüm geometri soruları tek seferde başarıyla okundu ve puanlandı! Değerlendirme paneline giderek onaylayabilirsiniz.")
-                            st.session_state.active_tab = "ai_degerlendirme"
-                            st.rerun()
-                        else:
-                            st.error(f"Hata: {ai_result.get('error')}")
-                            
-        # Toplu/Dosyadan Yükleme Bölümü
+        
+    with scan_col2:
+        st.markdown("<div class='premium-card' style='text-align:center;'>", unsafe_allow_html=True)
+        st.markdown("<h5>📤 Galeriden/Cihazdan Yükle</h5>", unsafe_allow_html=True)
+        file_photo = st.file_uploader("Kağıt Görselini Seçin veya Bırakın", type=["png", "jpg", "jpeg"], key="file_tarama_input")
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+    active_image = None
+    if camera_photo:
+        active_image = Image.open(camera_photo)
+    elif file_photo:
+        active_image = Image.open(file_photo)
+        
+    if active_image:
         st.markdown("---")
-        st.markdown("<h4>📤 Çoklu Öğrenci Kağıdı Toplu Yükleme</h4>", unsafe_allow_html=True)
-        st.write("Birden fazla öğrencinin taranmış sınav kağıtlarını topluca sisteme yükleyebilirsiniz.")
-        uploaded_files = st.file_uploader(
-            "Öğrenci kağıtlarını sürükleyip bırakın", 
-            type=["png", "jpg", "jpeg", "pdf"], 
-            accept_multiple_files=True,
-            key="bulk_student_uploader"
-        )
-        if uploaded_files:
-            st.success(f"{len(uploaded_files)} adet öğrenci kağıdı başarıyla yüklendi! Sırayla öğrencileri seçerek taranan görselleri doğrulayabilirsiniz.")
+        st.markdown("<h5>🖼️ Taranan Görsel Önizleme</h5>", unsafe_allow_html=True)
+        st.image(active_image, use_container_width=True, caption="Yüklenen Öğrenci Kağıdı")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if not api_key:
+            st.info("💡 Puanlamayı başlatmak için lütfen sol menüden Google Gemini API Anahtarınızı giriniz veya Secrets tanımını yapınız.")
+        else:
+            if st.button("🤖 Yapay Zeka ile Analiz Et & Not Defterine Kaydet", key="btn_eval_new_paper", use_container_width=True):
+                with st.spinner("Gemini 1.5 Flash el yazısı öğrenci kimliğini okuyor, geometri şekillerini analiz ediyor ve puanlıyor..."):
+                    ai_result = evaluate_entire_exam_page(
+                        api_key, 
+                        active_image, 
+                        st.session_state.exam_config["questions"]
+                    )
+                    
+                    if ai_result.get("success"):
+                        student_info = ai_result.get("student_info", {})
+                        name = student_info.get("name", "Bilinmeyen Öğrenci").strip()
+                        s_class = student_info.get("class", "5-A").strip().upper()
+                        s_no = student_info.get("no", "").strip()
+                        
+                        # Okul no okunamadıysa dinamik eşsiz ID üret
+                        if not s_no or s_no == "Bilinmeyen No":
+                            s_no = str(len(st.session_state.student_records) + 101)
+                            
+                        # Öğrenci kaydını dinamik olarak oluştur (Sıfır Konfigürasyon Sihri)
+                        st.session_state.student_records[s_no] = {
+                            "id": s_no,
+                            "name": name,
+                            "class": s_class,
+                            "status": "Bekliyor",
+                            "grades": {}
+                        }
+                        
+                        # Puanları yerleştir
+                        for q_id, q_res in ai_result["grades"].items():
+                            st.session_state.student_records[s_no]["grades"][q_id] = {
+                                "score_concept": q_res["score_concept"],
+                                "score_steps": q_res["score_steps"],
+                                "score_result": q_res["score_result"],
+                                "score_total": q_res["score_total"],
+                                "ai_feedback": q_res["ai_feedback"],
+                                "student_solution": q_res.get("detected_text", "Okundu."),
+                                "teacher_override": False,
+                                "teacher_score": q_res["score_total"],
+                                "ai_score_initial": q_res["score_total"]
+                            }
+                            
+                        # Görseli de saklayalım
+                        st.session_state[f"custom_img_{s_no}"] = active_image
+                        
+                        st.success(f"🎉 Başarıyla Tamamlandı! AI Öğrenciyi Kağıttan Tanıdı:\n"
+                                   f"- **Öğrenci:** {name}\n"
+                                   f"- **Okul No:** {s_no}\n"
+                                   f"- **Sınıfı:** {s_class}\n"
+                                   f"Değerlendirme ekranına yönlendiriliyorsunuz...")
+                        
+                        # Değerlendirme sekmesine otomatik yönlendir
+                        st.session_state.active_tab = "ai_degerlendirme"
+                        st.rerun()
+                    else:
+                        st.error(f"Hata: {ai_result.get('error')}")
 
 # ==================== VIEW 3: AI DEĞERLENDİRME ====================
 elif st.session_state.active_tab == "ai_degerlendirme":
     st.markdown("<h3 style='margin-bottom: 10px;'>🧠 Yapay Zeka Değerlendirme ve Öğretmen Denetimi</h3>", unsafe_allow_html=True)
-    st.write("Gemini AI tarafından taranıp puanlanan el yazısı çözümleri, geometri çizimlerini ve puan kırılma mantığını buradan denetleyip nihai onayınızı verebilirsiniz.")
     
-    # Öğrenci ve Soru Seçimi
-    col_sel1, col_sel2 = st.columns(2)
-    
-    student_ids = []
-    student_options = []
-    for s_id, record in st.session_state.student_records.items():
-        if selected_class == "Tüm Sınıflar" or record.get("class", "5-A") == selected_class:
-            student_ids.append(s_id)
-            status_icon = "✅" if record["status"] == "Onaylandı" else "⏳"
-            student_options.append(f"{status_icon} No: {s_id} - {record['name']} ({record.get('class', '5-A')})")
-            
-    if not student_options:
-        st.warning("⚠️ Seçili şubede öğrenci bulunamadı.")
-    else:
-        with col_sel1:
-            selected_student_idx = st.selectbox(
-                "İncelenecek Öğrenci",
-                range(len(student_options)),
-                format_func=lambda x: student_options[x],
-                key="eval_student_select"
-            )
-            selected_student_id = student_ids[selected_student_idx]
-            student_record = st.session_state.student_records[selected_student_id]
-            
-        with col_sel2:
-            question_keys = list(st.session_state.exam_config["questions"].keys())
-            selected_q_id = st.selectbox(
-                "İncelenecek Soru",
-                question_keys,
-                format_func=lambda x: st.session_state.exam_config["questions"][x]["title"],
-                key="eval_q_select"
-            )
-            
-        question_info = st.session_state.exam_config["questions"][selected_q_id]
-        
-        # Soru Açıklaması
-        st.markdown(f"""
-            <div style='background-color:#1e2036; padding:12px 20px; border-radius:10px; margin-bottom:15px;'>
-                <strong>Soru:</strong> {question_info['desc']}<br>
-                <span style='color:#a78bfa; font-size:0.9rem;'><strong>Doğru Cevap Anahtarı:</strong> {question_info['correct_solution'].replace('\n', ' | ')}</span>
+    if not st.session_state.student_records:
+        st.markdown("""
+            <div class='premium-card' style='text-align:center; padding: 40px;'>
+                <h4 style='color:#a78bfa;'>ℹ️ Değerlendirilecek Kağıt Bulunmamaktadır</h4>
+                <p style='color:#94a3b8; font-size:1.05rem;'>Notlandırma sisteminde henüz okutulmuş/taranmış bir yazılı kağıdı yok.</p>
+                <p style='color:#6366f1; font-weight:600;'>Başlamak için lütfen en alttaki yüzen görev çubuğundan 📷 Kağıt Tarama ikonuna tıklayarak ilk kağıdı okutun!</p>
             </div>
         """, unsafe_allow_html=True)
+    else:
+        st.write("Gemini AI tarafından taranıp puanlanan el yazısı çözümleri, geometri çizimlerini ve puan kırılma mantığını buradan denetleyip nihai onayınızı verebilirsiniz.")
         
-        grade_data = student_record["grades"].get(selected_q_id)
+        # Öğrenci ve Soru Seçimi
+        col_sel1, col_sel2 = st.columns(2)
         
-        # Öğrencinin taranmış görseli
-        active_image = st.session_state.get(f"custom_img_{selected_student_id}")
-        if active_image is None:
-            active_image = get_student_solution_image(selected_student_id, "global")
-
-        if not grade_data:
-            st.warning("⏳ Bu öğrencinin kağıdı henüz taranıp analiz edilmemiştir. Lütfen önce '📷 Kağıt Tarama' sekmesinden kağıdı okutun.")
+        student_ids = []
+        student_options = []
+        for s_id, record in st.session_state.student_records.items():
+            if selected_class == "Tüm Sınıflar" or record.get("class", "5-A") == selected_class:
+                student_ids.append(s_id)
+                status_icon = "✅" if record["status"] == "Onaylandı" else "⏳"
+                student_options.append(f"{status_icon} No: {s_id} - {record['name']} ({record.get('class', '5-A')})")
+                
+        if not student_options:
+            st.warning("⚠️ Seçili şubede taranmış öğrenci kağıdı bulunamadı. Lütfen sol menüden şubeyi değiştirin veya 'Tüm Sınıflar'ı seçin.")
         else:
-            layout_col1, layout_col2 = st.columns([11, 10])
-            
-            with layout_col1:
-                st.markdown("<h5 style='color:#a78bfa;'>📷 Öğrenci Kağıdı Görseli</h5>", unsafe_allow_html=True)
-                if active_image:
-                    st.image(active_image, use_container_width=True, caption=f"{student_record['name']} - Orijinal Kağıt")
+            with col_sel1:
+                selected_student_idx = st.selectbox(
+                    "İncelenecek Öğrenci",
+                    range(len(student_options)),
+                    format_func=lambda x: student_options[x],
+                    key="eval_student_select"
+                )
+                selected_student_id = student_ids[selected_student_idx]
+                student_record = st.session_state.student_records[selected_student_id]
                 
-                with st.expander("📝 AI Okunan OCR Çözüm Metni", expanded=False):
-                    st.code(grade_data["student_solution"])
-                    
-            with layout_col2:
-                st.markdown("<h5 style='color:#a78bfa;'>🤖 Yapay Zeka Değerlendirme Özeti</h5>", unsafe_allow_html=True)
-                
-                # Rubrik Metrikleri
-                sub_col1, sub_col2, sub_col3, sub_col4 = st.columns(4)
-                with sub_col1:
-                    st.metric("Kavramsal", f"{grade_data['score_concept']} / {question_info['rubric']['concept']}")
-                with sub_col2:
-                    st.metric("İşlem Adımı", f"{grade_data['score_steps']} / {question_info['rubric']['steps']}")
-                with sub_col3:
-                    st.metric("Sonuç", f"{grade_data['score_result']} / {question_info['rubric']['result']}")
-                with sub_col4:
-                    st.metric("Toplam Puan", f"{grade_data['score_total']} / {question_info['max_score']}")
-                
-                # Muhakeme Gerekçesi
-                st.markdown(f"""
-                    <div class='premium-card' style='font-size:0.95rem; line-height:1.5; border-left:4px solid #6366f1;'>
-                        <h6 style='margin-top:0px; color:#6366f1;'>🔍 AI Adım Adım Notlandırma Gerekçesi:</h6>
-                        {grade_data['ai_feedback'].replace('\n', '<br>')}
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # Öğretmen Düzenleme Sürgüsü
-                st.markdown("<h6 style='color:#a78bfa;'>✏️ Öğretmen Değerlendirme Onayı & Müdahale Yetkisi</h6>", unsafe_allow_html=True)
-                override_score = st.slider(
-                    "Öğrencinin Nihai Puanını Belirleyin",
-                    min_value=0.0,
-                    max_value=float(question_info["max_score"]),
-                    value=float(grade_data["teacher_score"]),
-                    step=0.5,
-                    key=f"slider_override_{selected_student_id}_{selected_q_id}"
+            with col_sel2:
+                question_keys = list(st.session_state.exam_config["questions"].keys())
+                selected_q_id = st.selectbox(
+                    "İncelenecek Soru",
+                    question_keys,
+                    format_func=lambda x: st.session_state.exam_config["questions"][x]["title"],
+                    key="eval_q_select"
                 )
                 
-                is_overridden = override_score != float(grade_data["ai_score_initial"])
+            question_info = st.session_state.exam_config["questions"][selected_q_id]
+            
+            # Soru Açıklaması
+            st.markdown(f"""
+                <div style='background-color:#1e2036; padding:12px 20px; border-radius:10px; margin-bottom:15px;'>
+                    <strong>Soru:</strong> {question_info['desc']}<br>
+                    <span style='color:#a78bfa; font-size:0.9rem;'><strong>Doğru Cevap Anahtarı:</strong> {question_info['correct_solution'].replace('\n', ' | ')}</span>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            grade_data = student_record["grades"].get(selected_q_id)
+            
+            # Öğrencinin taranmış görseli
+            active_image = st.session_state.get(f"custom_img_{selected_student_id}")
+
+            if not grade_data:
+                st.warning(f"⏳ Bu öğrenciye ait Soru {selected_q_id} için AI notu bulunmamaktadır.")
+            else:
+                layout_col1, layout_col2 = st.columns([11, 10])
                 
-                if is_overridden:
+                with layout_col1:
+                    st.markdown("<h5 style='color:#a78bfa;'>📷 Öğrenci Kağıdı Görseli</h5>", unsafe_allow_html=True)
+                    if active_image:
+                        st.image(active_image, use_container_width=True, caption=f"{student_record['name']} - Orijinal Kağıt")
+                    else:
+                        st.info("Kağıt görseli bulunamadı.")
+                    
+                    with st.expander("📝 AI Okunan OCR Çözüm Metni", expanded=False):
+                        st.code(grade_data["student_solution"])
+                        
+                with layout_col2:
+                    st.markdown("<h5 style='color:#a78bfa;'>🤖 Yapay Zeka Değerlendirme Özeti</h5>", unsafe_allow_html=True)
+                    
+                    # Rubrik Metrikleri
+                    sub_col1, sub_col2, sub_col3, sub_col4 = st.columns(4)
+                    with sub_col1:
+                        st.metric("Kavramsal", f"{grade_data['score_concept']} / {question_info['rubric']['concept']}")
+                    with sub_col2:
+                        st.metric("İşlem Adımı", f"{grade_data['score_steps']} / {question_info['rubric']['steps']}")
+                    with sub_col3:
+                        st.metric("Sonuç", f"{grade_data['score_result']} / {question_info['rubric']['result']}")
+                    with sub_col4:
+                        st.metric("Toplam Puan", f"{grade_data['score_total']} / {question_info['max_score']}")
+                    
+                    # Muhakeme Gerekçesi
                     st.markdown(f"""
-                        <div class='info-card'>
-                            ⚠️ <strong>Puan Güncellemesi:</strong> AI puanı olan <strong>{grade_data['ai_score_initial']}</strong> yerine 
-                            manuel olarak <strong>{override_score}</strong> vermeyi seçtiniz.
-                        </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown("""
-                        <div class='success-card'>
-                            ✅ Puan AI'nın önerdiği ilk değerle tam uyumlu.
+                        <div class='premium-card' style='font-size:0.95rem; line-height:1.5; border-left:4px solid #6366f1;'>
+                            <h6 style='margin-top:0px; color:#6366f1;'>🔍 AI Adım Adım Notlandırma Gerekçesi:</h6>
+                            {grade_data['ai_feedback'].replace('\n', '<br>')}
                         </div>
                     """, unsafe_allow_html=True)
                     
-                # Onayla & Kaydet
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    st.markdown("<div class='approve-btn'>", unsafe_allow_html=True)
-                    if st.button("✔️ Değerlendirmeyi Onayla ve Kaydet", key=f"btn_approve_eval_{selected_student_id}_{selected_q_id}"):
-                        save_teacher_approval(
-                            selected_student_id, 
-                            selected_q_id, 
-                            override_score, 
-                            is_overridden
-                        )
-                        check_student_all_approved(selected_student_id)
-                        st.success(f"{student_record['name']} - Soru {selected_q_id} onaylandı!")
+                    # Öğretmen Düzenleme Sürgüsü
+                    st.markdown("<h6 style='color:#a78bfa;'>✏️ Öğretmen Değerlendirme Onayı & Müdahale Yetkisi</h6>", unsafe_allow_html=True)
+                    override_score = st.slider(
+                        "Öğrencinin Nihai Puanını Belirleyin",
+                        min_value=0.0,
+                        max_value=float(question_info["max_score"]),
+                        value=float(grade_data["teacher_score"]),
+                        step=0.5,
+                        key=f"slider_override_{selected_student_id}_{selected_q_id}"
+                    )
+                    
+                    is_overridden = override_score != float(grade_data["ai_score_initial"])
+                    
+                    if is_overridden:
+                        st.markdown(f"""
+                            <div class='info-card'>
+                                ⚠️ <strong>Puan Güncellemesi:</strong> AI puanı olan <strong>{grade_data['ai_score_initial']}</strong> yerine 
+                                manuel olarak <strong>{override_score}</strong> vermeyi seçtiniz.
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown("""
+                            <div class='success-card'>
+                                ✅ Puan AI'nın önerdiği ilk değerle tam uyumlu.
+                            </div>
+                        """, unsafe_allow_html=True)
                         
-                        # Bir sonraki soruya otomatik geçiş
-                        next_q_idx = question_keys.index(selected_q_id) + 1
-                        if next_q_idx < len(question_keys):
-                            st.rerun()
-                        else:
-                            st.success(f"🎉 {student_record['name']} kağıdındaki tüm sorular başarıyla onaylandı!")
-                            st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    # Onayla & Kaydet
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        st.markdown("<div class='approve-btn'>", unsafe_allow_html=True)
+                        if st.button("✔️ Değerlendirmeyi Onayla ve Kaydet", key=f"btn_approve_eval_{selected_student_id}_{selected_q_id}"):
+                            save_teacher_approval(
+                                selected_student_id, 
+                                selected_q_id, 
+                                override_score, 
+                                is_overridden
+                            )
+                            check_student_all_approved(selected_student_id)
+                            st.success(f"{student_record['name']} - Soru {selected_q_id} onaylandı!")
+                            
+                            # Bir sonraki soruya otomatik geçiş
+                            next_q_idx = question_keys.index(selected_q_id) + 1
+                            if next_q_idx < len(question_keys):
+                                st.rerun()
+                            else:
+                                st.success(f"🎉 {student_record['name']} kağıdındaki tüm sorular başarıyla onaylandı!")
+                                st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
 # ==================== VIEW 4: NOT DEFTERİ & ANALİZ ====================
 elif st.session_state.active_tab == "not_defteri":
     st.markdown("<h3 style='margin-bottom: 10px;'>📊 Sınav Not Defteri, Analiz ve Yönetim</h3>", unsafe_allow_html=True)
-    st.write("Sınav ortalamalarını, öğrenci not dökümlerini görebilir, taranan öğrenci kayıtlarını yönetebilir ve AI kalibrasyon verilerini inceleyebilirsiniz.")
     
-    # ---------------- DAHILI ANALITIK KPI PANELI (Eski Tab 1 Dashboard) ----------------
-    st.markdown("<h5>📉 Sınıf Başarı İstatistikleri</h5>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-            <div class='metric-card'>
-                <div class='metric-label'>Ortalama Sınıf Notu</div>
-                <div class='metric-value'>{avg_score:.1f}</div>
-                <div style='color: #34d399; font-size: 0.85rem; margin-top: 5px;'>Başarı Oranı: %{avg_score:.1f}</div>
+    if not st.session_state.student_records:
+        st.markdown("""
+            <div class='premium-card' style='text-align:center; padding: 40px;'>
+                <h4 style='color:#a78bfa;'>📉 İstatistikler ve Not Listesi Hazırlanıyor...</h4>
+                <p style='color:#94a3b8; font-size:1.05rem;'>Not defteriniz henüz boş. Öğrencilerinizin sınav kağıtlarını okuttuğunuzda;</p>
+                <p style='color:#94a3b8; font-size:1.05rem;'>sınıf başarı grafikleri, not listesi ve AI hata payı kalibrasyonu burada anında listelenecektir.</p>
+                <p style='color:#6366f1; font-weight:600; margin-top: 15px;'>Lütfen en alttaki yüzen çubuktan 📷 Kağıt Tarama ikonuna tıklayarak ilk kağıdı okutun!</p>
             </div>
         """, unsafe_allow_html=True)
-    with col2:
-        completion_rate = (approved_count / total_students) * 100 if total_students > 0 else 0
-        st.markdown(f"""
-            <div class='metric-card'>
-                <div class='metric-label'>Onaylanma Oranı</div>
-                <div class='metric-value'>%{completion_rate:.0f}</div>
-                <div style='color: #a78bfa; font-size: 0.85rem; margin-top: 5px;'>{approved_count} Onaylanan / {total_students} Toplam</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        detailed_df = get_detailed_grades_dataframe()
-        if selected_class != "Tüm Sınıflar":
-            detailed_df = detailed_df[detailed_df["Sınıf"] == selected_class]
-        hardest_q = "Soru 25"
-        lowest_ratio = 1.0
+    else:
+        st.write("Sınav ortalamalarını, öğrenci not dökümlerini görebilir, taranan öğrenci kayıtlarını yönetebilir ve AI kalibrasyon verilerini inceleyebilirsiniz.")
         
-        for q_id, q_info in st.session_state.exam_config["questions"].items():
-            col_name = f"Soru {q_id}"
-            if col_name in detailed_df.columns:
-                avg_q = detailed_df[col_name].mean()
-                ratio = avg_q / q_info["max_score"]
-                if ratio < lowest_ratio:
-                    lowest_ratio = ratio
-                    hardest_q = f"Soru {q_id}"
-                    
-        st.markdown(f"""
-            <div class='metric-card'>
-                <div class='metric-label'>En Çok Zorlanılan Soru</div>
-                <div class='metric-value'>{hardest_q}</div>
-                <div style='color: #f87171; font-size: 0.85rem; margin-top: 5px;'>Ortalama Başarı: %{lowest_ratio*100:.0f}</div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # ---------------- ÖĞRENCİ NOT LİSTESİ VE SİLME YÖNETİMİ ----------------
-    tab4_col1, tab4_col2 = st.columns([3, 2])
-    
-    with tab4_col1:
-        st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-        st.markdown("<h5>📋 Öğrenci Not Listesi</h5>", unsafe_allow_html=True)
-        st.write("Sınıfınızdaki öğrencilerin soru bazlı ve toplam sınav notları dökümü aşağıdadır:")
-        
-        detailed_table = get_detailed_grades_dataframe()
-        if selected_class != "Tüm Sınıflar":
-            detailed_table = detailed_table[detailed_table["Sınıf"] == selected_class]
-        
-        # HTML Tablosunun mobil uyumlu sarmalayıcı (.table-responsive) içine alınması (Yatay Kaydırma Çözümü)
-        html_table = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
-        for col in detailed_table.columns:
-            html_table += f"<th>{col}</th>"
-        html_table += "</tr></thead><tbody>"
-        
-        for _, row in detailed_table.iterrows():
-            html_table += "<tr>"
-            for col in detailed_table.columns:
-                val = row[col]
-                if col == "Durum":
-                    badge_class = "status-approved" if val == "Onaylandı" else "status-pending"
-                    html_table += f"<td><span class='status-badge {badge_class}'>{val}</span></td>"
-                else:
-                    html_table += f"<td>{val}</td>"
-            html_table += "</tr>"
-        html_table += "</tbody></table></div>"
-        
-        st.markdown(html_table, unsafe_allow_html=True)
-        
+        # ---------------- DAHILI ANALITIK KPI PANELI (Eski Tab 1 Dashboard) ----------------
+        st.markdown("<h5>📉 Sınıf Başarı İstatistikleri</h5>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>Ortalama Sınıf Notu</div>
+                    <div class='metric-value'>{avg_score:.1f}</div>
+                    <div style='color: #34d399; font-size: 0.85rem; margin-top: 5px;'>Başarı Oranı: %{avg_score:.1f}</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            completion_rate = (approved_count / total_students) * 100 if total_students > 0 else 0
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>Onaylanma Oranı</div>
+                    <div class='metric-value'>%{completion_rate:.0f}</div>
+                    <div style='color: #a78bfa; font-size: 0.85rem; margin-top: 5px;'>{approved_count} Onaylanan / {total_students} Toplam</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            detailed_df = get_detailed_grades_dataframe()
+            if selected_class != "Tüm Sınıflar":
+                detailed_df = detailed_df[detailed_df["Sınıf"] == selected_class]
+            hardest_q = "Soru 25"
+            lowest_ratio = 1.0
+            
+            for q_id, q_info in st.session_state.exam_config["questions"].items():
+                col_name = f"Soru {q_id}"
+                if col_name in detailed_df.columns:
+                    avg_q = detailed_df[col_name].mean()
+                    ratio = avg_q / q_info["max_score"]
+                    if ratio < lowest_ratio:
+                        lowest_ratio = ratio
+                        hardest_q = f"Soru {q_id}"
+                        
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>En Çok Zorlanılan Soru</div>
+                    <div class='metric-value'>{hardest_q}</div>
+                    <div style='color: #f87171; font-size: 0.85rem; margin-top: 5px;'>Ortalama Başarı: %{lowest_ratio*100:.0f}</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # CSV Dışa Aktarma
-        csv_data = detailed_table.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Sınav Sonuçlarını CSV Olarak İndir",
-            data=csv_data,
-            file_name="notver_sinav_sonuclari.csv",
-            mime="text/csv",
-            key="btn_download_csv_defter"
-        )
+        # ---------------- ÖĞRENCİ NOT LİSTESİ VE SİLME YÖNETİMİ ----------------
+        tab4_col1, tab4_col2 = st.columns([3, 2])
         
-        # 🗑️ Öğrenci Kaydı Yönetimi & Silme Butonu
-        st.markdown("---")
-        st.markdown("<h5>🗑️ Öğrenci Kaydı Yönetimi (Silme)</h5>", unsafe_allow_html=True)
-        st.write("Okutulan veya listede kayıtlı olan bir öğrenciyi ve not dökümlerini sistemden tamamen silebilirsiniz:")
-        
-        delete_options = []
-        delete_mapping = {}
-        for s_id, record in st.session_state.student_records.items():
-            if selected_class == "Tüm Sınıflar" or record.get("class") == selected_class:
-                option_str = f"No: {s_id} - {record['name']} ({record.get('class', '5-A')})"
-                delete_options.append(option_str)
-                delete_mapping[option_str] = s_id
-                
-        if not delete_options:
-            st.info("Silinebilecek kayıtlı öğrenci bulunmamaktadır.")
-        else:
-            col_del1, col_del2 = st.columns([3, 1])
-            with col_del1:
-                selected_del_str = st.selectbox(
-                    "Silinecek Öğrenciyi Seçin",
-                    delete_options,
-                    key="selectbox_student_to_delete"
-                )
-            with col_del2:
-                st.markdown("<div class='delete-btn'>", unsafe_allow_html=True)
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True) # Dikey hizalama boşluğu
-                if st.button("🗑️ Kaydı Sil", use_container_width=True, key="btn_confirm_delete"):
-                    s_id_to_delete = delete_mapping[selected_del_str]
-                    del st.session_state.student_records[s_id_to_delete]
-                    st.success("Öğrenci kaydı başarıyla silindi!")
-                    st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with tab4_col2:
-        st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-        st.markdown("<h5>🎯 Öğretmen - AI Kalibrasyon Analizi</h5>", unsafe_allow_html=True)
-        st.write(
-            "Öğretmenin AI puanlarına yaptığı manuel müdahaleler ve düzeltmeler burada analiz edilir. "
-            "Bu veriler, sistemin gelecekteki sınavlarda daha doğru puanlama yapabilmesi için kalibre edilmesinde kullanılır."
-        )
-        
-        cal_stats = get_calibration_analytics()
-        
-        if not cal_stats["has_data"]:
-            st.info(
-                "Henüz hiçbir puanda manuel değişiklik yapmadınız. "
-                "AI puanlarını düzenlediğinizde, kalibrasyon analiz grafiği ve hata payı verileri burada belirecektir."
-            )
-        else:
-            # Kalibrasyon Metrikleri
-            kpi1, kpi2 = st.columns(2)
-            with kpi1:
-                st.metric(
-                    "Ortalama Hata Payı (MAE)", 
-                    f"{cal_stats['mae']} Puan",
-                    help="Öğretmenin manuel düzeltmelerinin AI'ın ilk tahmininden olan ortalama mutlak sapma puanı."
-                )
-            with kpi2:
-                st.metric(
-                    "Toplam Düzeltme Sayısı", 
-                    f"{cal_stats['total_corrections']} Adet"
-                )
+        with tab4_col1:
+            st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
+            st.markdown("<h5>📋 Öğrenci Not Listesi</h5>", unsafe_allow_html=True)
+            st.write("Sınıfınızdaki öğrencilerin soru bazlı ve toplam sınav notları dökümü aşağıdadır:")
+            
+            detailed_table = get_detailed_grades_dataframe()
+            if selected_class != "Tüm Sınıflar":
+                detailed_table = detailed_table[detailed_table["Sınıf"] == selected_class]
+            
+            # HTML Tablosunun mobil uyumlu sarmalayıcı (.table-responsive) içine alınması (Yatay Kaydırma Çözümü)
+            html_table = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
+            for col in detailed_table.columns:
+                html_table += f"<th>{col}</th>"
+            html_table += "</tr></thead><tbody>"
+            
+            for _, row in detailed_table.iterrows():
+                html_table += "<tr>"
+                for col in detailed_table.columns:
+                    val = row[col]
+                    if col == "Durum":
+                        badge_class = "status-approved" if val == "Onaylandı" else "status-pending"
+                        html_table += f"<td><span class='status-badge {badge_class}'>{val}</span></td>"
+                    else:
+                        html_table += f"<td>{val}</td>"
+                html_table += "</tr>"
+            html_table += "</tbody></table></div>"
+            
+            st.markdown(html_table, unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Kalibrasyon Grafiği (AI vs Öğretmen Dağılım Grafiği)
-            df_cal = cal_stats["data"]
-            fig_cal = px.scatter(
-                df_cal,
-                x="ai_score",
-                y="teacher_score",
-                color="question",
-                hover_data=["student_name", "difference"],
-                labels={"ai_score": "Yapay Zeka Puanı", "teacher_score": "Öğretmen Nihai Puanı"},
-                title="Yapay Zeka vs Öğretmen Puan Karşılaştırması"
-            )
-            # 1'e 1 referans çizgisi ekleme (Mükemmel uyum çizgisi)
-            min_val = min(df_cal["ai_score"].min(), df_cal["teacher_score"].min()) - 1
-            max_val = max(df_cal["ai_score"].max(), df_cal["teacher_score"].max()) + 1
-            fig_cal.add_trace(go.Scatter(
-                x=[min_val, max_val],
-                y=[min_val, max_val],
-                mode='lines',
-                name='Mükemmel Uyum',
-                line=dict(dash='dash', color='rgba(255,255,255,0.3)')
-            ))
-            
-            fig_cal.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#94a3b8',
-                xaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
-                yaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
-                margin=dict(l=10, r=10, t=30, b=10),
-                height=260
-            )
-            st.plotly_chart(fig_cal, use_container_width=True)
-            
-            # Değişiklik Günlüğü Tablosu
-            st.markdown("<h6>📝 Yapılan Düzeltmelerin Kaydı</h6>", unsafe_allow_html=True)
-            st.dataframe(
-                df_cal.rename(columns={
-                    "student_name": "Öğrenci",
-                    "question": "Soru",
-                    "ai_score": "AI Puan",
-                    "teacher_score": "Öğretmen Puan",
-                    "difference": "Fark"
-                }),
-                use_container_width=True,
-                hide_index=True
+            # CSV Dışa Aktarma
+            csv_data = detailed_table.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Sınav Sonuçlarını CSV Olarak İndir",
+                data=csv_data,
+                file_name="notver_sinav_sonuclari.csv",
+                mime="text/csv",
+                key="btn_download_csv_defter"
             )
             
-        st.markdown("</div>", unsafe_allow_html=True)
+            # 🗑️ Öğrenci Kaydı Yönetimi & Silme Butonu
+            st.markdown("---")
+            st.markdown("<h5>🗑️ Öğrenci Kaydı Yönetimi (Silme)</h5>", unsafe_allow_html=True)
+            st.write("Okutulan veya listede kayıtlı olan bir öğrenciyi ve not dökümlerini sistemden tamamen silebilirsiniz:")
+            
+            delete_options = []
+            delete_mapping = {}
+            for s_id, record in st.session_state.student_records.items():
+                if selected_class == "Tüm Sınıflar" or record.get("class") == selected_class:
+                    option_str = f"No: {s_id} - {record['name']} ({record.get('class', '5-A')})"
+                    delete_options.append(option_str)
+                    delete_mapping[option_str] = s_id
+                    
+            if not delete_options:
+                st.info("Silinebilecek kayıtlı öğrenci bulunmamaktadır.")
+            else:
+                col_del1, col_del2 = st.columns([3, 1])
+                with col_del1:
+                    selected_del_str = st.selectbox(
+                        "Silinecek Öğrenciyi Seçin",
+                        delete_options,
+                        key="selectbox_student_to_delete"
+                    )
+                with col_del2:
+                    st.markdown("<div class='delete-btn'>", unsafe_allow_html=True)
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True) # Dikey hizalama boşluğu
+                    if st.button("🗑️ Kaydı Sil", use_container_width=True, key="btn_confirm_delete"):
+                        s_id_to_delete = delete_mapping[selected_del_str]
+                        del st.session_state.student_records[s_id_to_delete]
+                        st.success("Öğrenci kaydı başarıyla silindi!")
+                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with tab4_col2:
+            st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
+            st.markdown("<h5>🎯 Öğretmen - AI Kalibrasyon Analizi</h5>", unsafe_allow_html=True)
+            st.write(
+                "Öğretmenin AI puanlarına yaptığı manuel müdahaleler ve düzeltmeler burada analiz edilir. "
+                "Bu veriler, sistemin gelecekteki sınavlarda daha doğru puanlama yapabilmesi için kalibre edilmesinde kullanılır."
+            )
+            
+            cal_stats = get_calibration_analytics()
+            
+            if not cal_stats["has_data"]:
+                st.info(
+                    "Henüz hiçbir puanda manuel değişiklik yapmadınız. "
+                    "AI puanlarını düzenlediğinizde, kalibrasyon analiz grafiği ve hata payı verileri burada belirecektir."
+                )
+            else:
+                # Kalibrasyon Metrikleri
+                kpi1, kpi2 = st.columns(2)
+                with kpi1:
+                    st.metric(
+                        "Ortalama Hata Payı (MAE)", 
+                        f"{cal_stats['mae']} Puan",
+                        help="Öğretmenin manuel düzeltmelerinin AI'ın ilk tahmininden olan ortalama mutlak sapma puanı."
+                    )
+                with kpi2:
+                    st.metric(
+                        "Toplam Düzeltme Sayısı", 
+                        f"{cal_stats['total_corrections']} Adet"
+                    )
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Kalibrasyon Grafiği (AI vs Öğretmen Dağılım Grafiği)
+                df_cal = cal_stats["data"]
+                fig_cal = px.scatter(
+                    df_cal,
+                    x="ai_score",
+                    y="teacher_score",
+                    color="question",
+                    hover_data=["student_name", "difference"],
+                    labels={"ai_score": "Yapay Zeka Puanı", "teacher_score": "Öğretmen Nihai Puanı"},
+                    title="Yapay Zeka vs Öğretmen Puan Karşılaştırması"
+                )
+                # 1'e 1 referans çizgisi ekleme (Mükemmel uyum çizgisi)
+                min_val = min(df_cal["ai_score"].min(), df_cal["teacher_score"].min()) - 1
+                max_val = max(df_cal["ai_score"].max(), df_cal["teacher_score"].max()) + 1
+                fig_cal.add_trace(go.Scatter(
+                    x=[min_val, max_val],
+                    y=[min_val, max_val],
+                    mode='lines',
+                    name='Mükemmel Uyum',
+                    line=dict(dash='dash', color='rgba(255,255,255,0.3)')
+                ))
+                
+                fig_cal.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='#94a3b8',
+                    xaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
+                    yaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    height=260
+                )
+                st.plotly_chart(fig_cal, use_container_width=True)
+                
+                # Değişiklik Günlüğü Tablosu
+                st.markdown("<h6>📝 Yapılan Düzeltmelerin Kaydı</h6>", unsafe_allow_html=True)
+                st.dataframe(
+                    df_cal.rename(columns={
+                        "student_name": "Öğrenci",
+                        "question": "Soru",
+                        "ai_score": "AI Puan",
+                        "teacher_score": "Öğretmen Puan",
+                        "difference": "Fark"
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+            st.markdown("</div>", unsafe_allow_html=True)
+

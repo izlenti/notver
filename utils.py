@@ -11,32 +11,9 @@ def initialize_session_state(mock_exam, mock_students):
     if "exam_config" not in st.session_state:
         st.session_state.exam_config = json.loads(json.dumps(mock_exam)) # Deep copy
         
-    # 2. Öğrenci Not Listesini Başlat
+    # 2. Öğrenci Not Listesini Başlat (Üretim Seviyesinde Boş Başlangıç)
     if "student_records" not in st.session_state:
-        records = {}
-        for s_id, s_data in mock_students.items():
-            records[s_id] = {
-                "id": s_id,
-                "name": s_data["name"],
-                "writing_style": s_data["writing_style"],
-                "class": s_data.get("class", "12-A"),
-                "status": "Bekliyor", # Bekliyor, Onaylandı
-                "grades": {}
-            }
-            # Her bir soru için varsayılan AI notlarını yerleştir
-            for q_id, q_grade in s_data["grades"].items():
-                records[s_id]["grades"][q_id] = {
-                    "score_concept": q_grade["score_concept"],
-                    "score_steps": q_grade["score_steps"],
-                    "score_result": q_grade["score_result"],
-                    "score_total": q_grade["score_total"],
-                    "ai_feedback": q_grade["ai_feedback"],
-                    "student_solution": q_grade["student_solution"],
-                    "teacher_override": False,
-                    "teacher_score": q_grade["score_total"], # Başlangıçta AI puanına eşit
-                    "ai_score_initial": q_grade["score_total"]
-                }
-        st.session_state.student_records = records
+        st.session_state.student_records = {}
 
     # 3. İstatistikleri ve Değişiklik Günlüklerini Başlat
     if "calibration_log" not in st.session_state:
@@ -47,18 +24,21 @@ def get_class_dataframe():
     Creates a pandas DataFrame summarizing student final scores and approval statuses.
     """
     data = []
-    for s_id, s_record in st.session_state.student_records.items():
-        total_score = 0
-        for q_id, q_data in s_record["grades"].items():
-            total_score += q_data["teacher_score"] # Öğretmenin nihai onayladığı veya değiştirdiği puan
-            
-        data.append({
-            "Öğrenci No": s_id,
-            "Ad Soyad": s_record["name"],
-            "Sınıf": s_record.get("class", "12-A"),
-            "Toplam Puan": total_score,
-            "Durum": "Onaylandı" if s_record["status"] == "Onaylandı" else "Taslak (Bekliyor)"
-        })
+    if "student_records" in st.session_state:
+        for s_id, s_record in st.session_state.student_records.items():
+            total_score = 0
+            for q_id, q_data in s_record["grades"].items():
+                total_score += q_data["teacher_score"] # Öğretmenin nihai onayladığı veya değiştirdiği puan
+                
+            data.append({
+                "Öğrenci No": s_id,
+                "Ad Soyad": s_record["name"],
+                "Sınıf": s_record.get("class", "5-A"),
+                "Toplam Puan": total_score,
+                "Durum": "Onaylandı" if s_record["status"] == "Onaylandı" else "Taslak (Bekliyor)"
+            })
+    if not data:
+        return pd.DataFrame(columns=["Öğrenci No", "Ad Soyad", "Sınıf", "Toplam Puan", "Durum"])
     return pd.DataFrame(data)
 
 def get_detailed_grades_dataframe():
@@ -66,19 +46,29 @@ def get_detailed_grades_dataframe():
     Creates a detailed DataFrame containing question-by-question scoring.
     """
     data = []
-    for s_id, s_record in st.session_state.student_records.items():
-        row = {
-            "Öğrenci No": s_id,
-            "Ad Soyad": s_record["name"],
-            "Sınıf": s_record.get("class", "12-A"),
-            "Durum": "Onaylandı" if s_record["status"] == "Onaylandı" else "Bekliyor"
-        }
-        total = 0
-        for q_id, q_data in s_record["grades"].items():
-            row[f"Soru {q_id}"] = q_data["teacher_score"]
-            total += q_data["teacher_score"]
-        row["Toplam Puan"] = total
-        data.append(row)
+    if "student_records" in st.session_state:
+        for s_id, s_record in st.session_state.student_records.items():
+            row = {
+                "Öğrenci No": s_id,
+                "Ad Soyad": s_record["name"],
+                "Sınıf": s_record.get("class", "5-A"),
+                "Durum": "Onaylandı" if s_record["status"] == "Onaylandı" else "Bekliyor"
+            }
+            total = 0
+            for q_id, q_data in s_record["grades"].items():
+                row[f"Soru {q_id}"] = q_data["teacher_score"]
+                total += q_data["teacher_score"]
+            row["Toplam Puan"] = total
+            data.append(row)
+    if not data:
+        # Sınav ayarlarındaki aktif soruları al
+        q_cols = []
+        if "exam_config" in st.session_state:
+            q_cols = [f"Soru {q_id}" for q_id in st.session_state.exam_config["questions"].keys()]
+        else:
+            q_cols = ["Soru 21", "Soru 22", "Soru 24", "Soru 25"]
+        cols = ["Öğrenci No", "Ad Soyad", "Sınıf"] + q_cols + ["Toplam Puan", "Durum"]
+        return pd.DataFrame(columns=cols)
     return pd.DataFrame(data)
 
 def save_teacher_approval(student_id, question_id, new_score, is_override):
