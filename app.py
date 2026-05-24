@@ -430,7 +430,7 @@ with tab_ai:
                     if not all_pages:
                         continue
                     res = evaluate_student_paper(api_key, cfg["answer_key_images"],
-                                                  all_pages[0] if len(all_pages)==1 else all_pages[0],
+                                                  all_pages,
                                                   cfg.get("questions",{}))
                     if res.get("success"):
                         grd  = res.get("grades",{})

@@ -118,10 +118,12 @@ def generate_with_retry(api_key, contents, generation_config=None, system_instru
         "gemini-2.0-flash",
         "gemini-1.5-flash-latest",
         "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro-latest",
         "gemini-1.5-pro"
     ]
     
-    last_error = None
+    tried_errors = []
     
     for model_name in models_to_try:
         max_retries = 3
@@ -143,17 +145,19 @@ def generate_with_retry(api_key, contents, generation_config=None, system_instru
                 )
                 return response, model_name
             except Exception as e:
-                err_msg = str(e).lower()
-                last_error = e
+                err_msg = str(e)
+                err_msg_lower = err_msg.lower()
                 
-                is_429 = "429" in err_msg or "resourceexhausted" in err_msg or "quota" in err_msg or "rate limit" in err_msg
-                is_not_found = "404" in err_msg or "not found" in err_msg or "not supported" in err_msg
+                is_429 = "429" in err_msg_lower or "resourceexhausted" in err_msg_lower or "quota" in err_msg_lower or "rate limit" in err_msg_lower
+                is_not_found = "404" in err_msg_lower or "not found" in err_msg_lower or "not supported" in err_msg_lower
                 
                 if is_not_found:
+                    tried_errors.append((model_name, "Desteklenmiyor / Bulunamadı (404)"))
                     break
                 
                 if is_429:
-                    if "limit: 0" in err_msg or "limit: 0.0" in err_msg:
+                    if "limit: 0" in err_msg_lower or "limit: 0.0" in err_msg_lower:
+                        tried_errors.append((model_name, "Kota Limiti Sıfır (limit: 0)"))
                         break
                     
                     if attempt < max_retries - 1:
@@ -161,13 +165,20 @@ def generate_with_retry(api_key, contents, generation_config=None, system_instru
                         backoff_sec *= 2
                         continue
                     else:
+                        tried_errors.append((model_name, "Rate Limit Aşıldı (429)"))
                         break
                 else:
+                    tried_errors.append((model_name, err_msg))
                     break
                     
-    if last_error:
-        raise last_error
-    raise Exception("Model list was empty or failed to run.")
+    if tried_errors:
+        err_details = []
+        for m_name, err in tried_errors:
+            err_details.append(f"• {m_name}: {err}")
+        err_msg = "Tüm modeller başarısız oldu:\n" + "\n".join(err_details)
+        raise Exception(err_msg)
+        
+    raise Exception("Model listesi boş veya çalıştırılamadı.")
 
 
 def read_answer_key(api_key, answer_key_images):
