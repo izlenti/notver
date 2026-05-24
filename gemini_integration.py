@@ -105,6 +105,71 @@ KESİNLİKLE aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
 """
 
 
+import time
+
+def generate_with_retry(api_key, contents, generation_config=None, system_instruction=None):
+    """
+    Tries multiple Gemini models and handles 429/quota errors with backoff.
+    """
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    
+    models_to_try = [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro"
+    ]
+    
+    last_error = None
+    
+    for model_name in models_to_try:
+        max_retries = 3
+        backoff_sec = 2
+        
+        for attempt in range(max_retries):
+            try:
+                if system_instruction:
+                    model = genai.GenerativeModel(
+                        model_name=model_name,
+                        system_instruction=system_instruction
+                    )
+                else:
+                    model = genai.GenerativeModel(model_name=model_name)
+                
+                response = model.generate_content(
+                    contents=contents,
+                    generation_config=generation_config
+                )
+                return response, model_name
+            except Exception as e:
+                err_msg = str(e).lower()
+                last_error = e
+                
+                is_429 = "429" in err_msg or "resourceexhausted" in err_msg or "quota" in err_msg or "rate limit" in err_msg
+                is_not_found = "404" in err_msg or "not found" in err_msg or "not supported" in err_msg
+                
+                if is_not_found:
+                    break
+                
+                if is_429:
+                    if "limit: 0" in err_msg or "limit: 0.0" in err_msg:
+                        break
+                    
+                    if attempt < max_retries - 1:
+                        time.sleep(backoff_sec)
+                        backoff_sec *= 2
+                        continue
+                    else:
+                        break
+                else:
+                    break
+                    
+    if last_error:
+        raise last_error
+    raise Exception("Model list was empty or failed to run.")
+
+
 def read_answer_key(api_key, answer_key_images):
     """
     Cevap anahtarı görsellerini okuyup soru yapısını çıkarır.
@@ -116,11 +181,9 @@ def read_answer_key(api_key, answer_key_images):
         return {"success": False, "error": "Cevap anahtarı görseli yüklenmedi."}
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
-
         contents = [ANSWER_KEY_PROMPT] + answer_key_images
-        response = model.generate_content(
+        response, used_model = generate_with_retry(
+            api_key=api_key,
             contents=contents,
             generation_config={"response_mime_type": "application/json"}
         )
@@ -132,6 +195,7 @@ def read_answer_key(api_key, answer_key_images):
                 raw = raw[4:]
         result = json.loads(raw)
         result["success"] = True
+        result["used_model"] = used_model
         return result
 
     except json.JSONDecodeError:
@@ -149,10 +213,8 @@ def read_student_identity(api_key, student_image):
         return {"success": False, "error": "API anahtarı bulunamadı."}
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
-
-        response = model.generate_content(
+        response, used_model = generate_with_retry(
+            api_key=api_key,
             contents=[IDENTITY_PROMPT, student_image],
             generation_config={"response_mime_type": "application/json"}
         )
@@ -165,6 +227,7 @@ def read_student_identity(api_key, student_image):
                 raw = raw[4:]
         result = json.loads(raw)
         result["success"] = True
+        result["used_model"] = used_model
         return result
 
     except json.JSONDecodeError:
@@ -188,19 +251,12 @@ def evaluate_student_paper(api_key, answer_key_images, student_paper, questions_
     if not api_key:
         return {"success": False, "error": "API anahtarı bulunamadı."}
 
-    # student_paper tek bir Image veya Image listesi olabilir
     if isinstance(student_paper, list):
         student_images = student_paper
     else:
         student_images = [student_paper]
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            system_instruction=EVALUATION_SYSTEM_PROMPT
-        )
-
         questions_text = "SINAV SORU YAPISI:\n"
         for q_id, q_info in questions_dict.items():
             questions_text += f"- Soru {q_id}: Maksimum {q_info['max_score']} puan\n"
@@ -221,9 +277,11 @@ sonra öğrenci kağıdı sayfaları ({len(student_images)} sayfa).
 """
 
         contents = [prompt] + answer_key_images + student_images
-        response = model.generate_content(
+        response, used_model = generate_with_retry(
+            api_key=api_key,
             contents=contents,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={"response_mime_type": "application/json"},
+            system_instruction=EVALUATION_SYSTEM_PROMPT
         )
 
         raw = response.text.strip()
@@ -234,6 +292,7 @@ sonra öğrenci kağıdı sayfaları ({len(student_images)} sayfa).
                 raw = raw[4:]
         result = json.loads(raw)
         result["success"] = True
+        result["used_model"] = used_model
         return result
 
     except json.JSONDecodeError:
