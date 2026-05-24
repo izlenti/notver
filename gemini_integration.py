@@ -3,152 +3,243 @@ import json
 import google.generativeai as genai
 from PIL import Image
 
-SYSTEM_PROMPT = """
-Sen açık uçlu matematik ve geometri sınavlarını puanlayan son derece hassas ve deneyimli bir yapay zeka öğretmenisin.
-Görevin, sana gönderilen öğrenci el yazısı sınav sayfalarını okumak (OCR), geometri şekilleri ve üzerindeki el yazısı açıları analiz etmek ve adil bir notlandırma yapmaktır.
+# ─────────────────────────────────────────────────────────────────────────────
+# Cevap anahtarından soru bilgilerini okuyan prompt
+# ─────────────────────────────────────────────────────────────────────────────
+ANSWER_KEY_PROMPT = """
+Sen bir matematik sınavı cevap anahtarı okuma uzmanısın.
+Sana bir öğretmenin hazırladığı cevap anahtarı görseli gönderilecek.
+Bu görselde sorular, doğru çözümler ve her soruya ait puanlar bulunmaktadır.
 
-Senden şu kurallara kesinlikle uymanı bekliyoruz:
-1. GEOMETRİ ŞEKİL & ÇİZİM ANALİZİ:
-   - Sorularda yer alan geometri şekillerini (çokgenler, üçgenler vb.) ve bunların üzerindeki el yazısı işaretlemeleri (açılar, kenar eşitlik çizgileri/tikleri, oklar, ek çizgiler) dikkatle analiz et.
-   - Öğrencinin şekillerin üzerine yerleştirdiği açı değerlerini ve ikizkenarlık çıkarımlarını çözüm mantığının bir parçası olarak değerlendir.
+Görevin:
+1. Görseldeki tüm soruları tespit et (soru numarası veya sıra numarası).
+2. Her sorunun maksimum puanını bul (örn: "9p", "7P", "10 puan" gibi yazılmış olabilir).
+3. Her sorunun doğru çözümünü/cevabını oku.
+4. Toplam puanı hesapla.
 
-2. TOPLU/BÜTÜNSEL SAYFA OKUMA (ÇOKLU SORU ANALİZİ):
-   - Sana gönderilen görsel tek bir sayfada birden fazla soru (örneğin Soru 21, 22, 24, 25) içeriyor olabilir.
-   - Görseldeki tüm soruları teker teker tespit et, her sorunun çözümünü kendi içinde ayrı ayrı değerlendir.
-
-3. HASSAS VE KADEMELİ PUANLAMA STRATEJİSİ:
-   - Her soru için öğretmen tarafından belirtilen maksimum puan (max_score) değerini baz al ve aşağıdaki oransal dağılıma göre puanla:
-     a) Kavramsal Yaklaşım ve Formül Kurulumu (%40): Doğru teoremi/formülü kurmuş mu? Geometride ikizkenarlık veya kenar eşitliğini yakalamış mı?
-     b) İşlem Adımları ve Matematiksel İlerleme (%40): Matematiksel adımları doğru ilerletmiş mi, adımlar arasında işlem veya mantık hatası var mı?
-     c) Sonuç ve Hesaplama Doğruluğu (%20): Nihai sonuç tam doğru mu?
-
-4. BASİT HATA VS KAVRAM HATASI AYRIMI:
-   - Ufak aritmetik/işlem hataları (örneğin basit bir bölme veya toplama hatası): Eğer tüm geometrik mantık ve teorem kurulumları doğruysa, sadece Sonuç Puanını (%20) sıfırla ve adımlardan çok küçük bir puan kır (örn. toplam 25 puanlık sorudan sadece 1 ya da 2 puan kır).
-   - Temel Kavram Hatası: Eğer yöntem tamamen yanlışsa, fakat tesadüfen sonuç doğru çıktıysa (Tesadüfi Doğru), bu adıma puan verme veya sembolik 1 puan ver.
-
-5. ÖĞRENCİ KİMLİK BİLGİLERİNİN OTOMATİK TESPİTİ (AUTO-IDENTITY EXTRACTION):
-   - Sınav kağıdının en üstünde yer alan öğrencinin Adı-Soyadı (name), Okul Numarası (no) ve Sınıf/Şube (class) bilgilerini görselden bulup oku (OCR).
-   - Eğer kağıt üzerinde bu bilgiler bulunmuyorsa veya okunamıyorsa, şu varsayılan değerleri ata:
-     * "name": "Bilinmeyen Öğrenci"
-     * "no": "Bilinmeyen No"
-     * "class": "5-A" (Veya kağıt üzerinde örneğin 6-B yazıyorsa tam olarak "6-B" olarak çıkar.)
-
-Senden cevabını KESİNLİKLE aşağıdaki JSON formatında vermeni rica ediyoruz. Başka hiçbir açıklama metni ekleme, doğrudan geçerli bir JSON döndür:
+KESİNLİKLE aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
 {
-  "student_info": {
-    "name": "<ogrenci_adi_soyadi>",
-    "class": "<sinif_sube_orn_5-A>",
-    "no": "<okul_numarasi_orn_101>"
-  },
-  "grades": {
-    "<soru_numarasi_1>": {
-      "score_concept": <kavramsal_yaklasim_puani_tamsayi>,
-      "score_steps": <islem_adimlari_puani_tamsayi>,
-      "score_result": <sonuc_dogrulugu_puani_tamsayi>,
-      "score_total": <toplam_puan_tamsayi>,
-      "detected_text": "<AI_tarafindan_okunan_cozum_metni>",
-      "ai_feedback": "<Türkçe dilinde, Kavramsal, İşlem ve Sonuç alt başlıklarıyla yapılan detaylı analiz ve puanlama gerekçesi.>"
+  "questions": {
+    "1": {
+      "title": "Soru 1",
+      "max_score": <puan_sayisi_integer>,
+      "correct_solution": "<dogru_cozum_metni>"
     },
-    "<soru_numarasi_2>": {
-      ...
+    "2": {
+      "title": "Soru 2", 
+      "max_score": <puan_sayisi_integer>,
+      "correct_solution": "<dogru_cozum_metni>"
     }
-  }
+  },
+  "total_max_score": <toplam_puan_integer>
+}
+
+Soru numarası görüntüde belirtilmemişse 1, 2, 3... olarak sırala.
+Puanlar görüntüde "9p", "7P", "7 puan", daire içinde sayı vb. şekillerde olabilir.
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Öğrenci kağıdı kimlik bilgisi okuma promptu
+# ─────────────────────────────────────────────────────────────────────────────
+IDENTITY_PROMPT = """
+Sen bir sınav kağıdı kimlik bilgisi okuma uzmanısın.
+Sana bir öğrencinin sınav kağıdının görseli gönderilecek.
+Kağıdın üst kısmında genellikle AD-SOYAD, NUMARA, SINIF alanları bulunur.
+
+Görevin: Bu üç bilgiyi kağıttan oku.
+
+Eğer bir bilgi okunamazsa varsayılan değerleri kullan.
+
+KESİNLİKLE aşağıdaki JSON formatında yanıt ver:
+{
+  "name": "<ad_soyad>",
+  "no": "<okul_numarasi>",
+  "class": "<sinif_orn_5_veya_5A>"
+}
+
+Eğer isim okunamazsa: "Bilinmeyen Öğrenci"
+Eğer numara okunamazsa: "0"
+Eğer sınıf okunamazsa: "Bilinmiyor"
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Öğrenci kağıdını cevap anahtarıyla karşılaştıran değerlendirme promptu
+# ─────────────────────────────────────────────────────────────────────────────
+EVALUATION_SYSTEM_PROMPT = """
+Sen açık uçlu matematik ve geometri sınavlarını puanlayan deneyimli bir yapay zeka öğretmenisin.
+Sana bir CEVAP ANAHTARI görseli ve bir ÖĞRENCİ KAĞIDI görseli gönderilecek.
+
+Görevin:
+1. Cevap anahtarındaki her soruyu ve doğru çözümü tespit et.
+2. Öğrencinin her soruya verdiği cevabı/çözümü oku (OCR).
+3. Her soruyu karşılaştırarak puanla.
+
+PUANLAMA KURALLARI:
+- Cevap anahtarındaki maksimum puanı baz al.
+- Tam doğru çözüm → tam puan
+- Mantık doğru ama küçük hesap hatası → puanın %70-90'ı
+- Kısmen doğru yaklaşım → puanın %30-60'ı  
+- Yanlış veya boş → 0 puan
+- Geometri çizimlerini ve şekillerin üzerindeki el yazısı notları dikkate al.
+- Dağınık ama doğru çözüm → tam puan (yazı güzelliği etkilemez).
+
+KESİNLİKLE aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
+{
+  "grades": {
+    "1": {
+      "score": <verilen_puan_integer>,
+      "max_score": <maksimum_puan_integer>,
+      "student_answer": "<okunan_ogrenci_cevabi>",
+      "feedback": "<Turkce_kisa_degerlendirme_1_2_cumle>"
+    },
+    "2": {
+      "score": <verilen_puan_integer>,
+      "max_score": <maksimum_puan_integer>,
+      "student_answer": "<okunan_ogrenci_cevabi>",
+      "feedback": "<Turkce_kisa_degerlendirme>"
+    }
+  },
+  "total_score": <toplam_verilen_puan>,
+  "total_max_score": <toplam_maksimum_puan>
 }
 """
 
-def evaluate_entire_exam_page(api_key, paper_image, questions_dict):
+
+def read_answer_key(api_key, answer_key_images):
     """
-    Evaluates an entire exam page containing multiple questions and geometry figures
-    using Gemini 1.5 Flash in a single API call.
+    Cevap anahtarı görsellerini okuyup soru yapısını çıkarır.
+    answer_key_images: list of PIL Image
     """
     if not api_key:
-        return {
-            "success": False,
-            "error": "API anahtarı girilmedi. Lütfen ayarlar kısmından API anahtarınızı giriniz veya Simülasyon modunu kullanınız."
-        }
+        return {"success": False, "error": "API anahtarı bulunamadı."}
+    if not answer_key_images:
+        return {"success": False, "error": "Cevap anahtarı görseli yüklenmedi."}
 
     try:
-        # API'yi Yapılandır
         genai.configure(api_key=api_key)
-        
-        # Gemini 1.5 Flash Modelini Yükle
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=SYSTEM_PROMPT
-        )
-        
-        # Soruların tanımlarını ve cevap anahtarlarını prompta ekle
-        questions_prompt = ""
-        for q_id, q_info in questions_dict.items():
-            questions_prompt += f"""
-            ---
-            Soru Numarası: {q_id}
-            Soru Başlığı: {q_info['title']}
-            Soru Açıklaması: {q_info['desc']}
-            Doğru Çözüm / Cevap Anahtarı: {q_info['correct_solution']}
-            Maksimum Puan: {q_info['max_score']} Puan
-            Rubrik Dağılımı: Kavramsal (Max: {q_info['max_score']*0.4}), İşlem Adımı (Max: {q_info['max_score']*0.4}), Sonuç (Max: {q_info['max_score']*0.2})
-            """
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
 
-        prompt = f"""
-        Aşağıda sınavda yer alan tüm soruların orijinal metinleri ve doğru çözüm cevap anahtarı yer almaktadır:
-        {questions_prompt}
-        
-        Lütfen ekteki öğrenci sınav kağıdı görselinin tamamını tara. 
-        Yukarıda belirtilen soru numaralarına göre (örneğin 21, 22, 24, 25) öğrencinin çözümlerini ve varsa geometri şekilleri üzerindeki el yazısı karalamaları/açıları analiz et.
-        Her soruyu ayrı ayrı puanlayıp Türkçe gerekçeleriyle birlikte sistem yönergesinde belirtilen JSON formatında yanıt döndür.
-        """
-        
-        # Görseli ve metni birlikte gönder
+        contents = [ANSWER_KEY_PROMPT] + answer_key_images
         response = model.generate_content(
-            contents=[prompt, paper_image],
+            contents=contents,
             generation_config={"response_mime_type": "application/json"}
         )
-        
-        # JSON çıktısını çözümle
-        result_json = json.loads(response.text)
-        result_json["success"] = True
-        return result_json
-        
-    except json.JSONDecodeError as je:
-        try:
-            raw_text = response.text.strip()
-            if raw_text.startswith("```json"):
-                raw_text = raw_text[7:]
-            if raw_text.endswith("```"):
-                raw_text = raw_text[:-3]
-            result_json = json.loads(raw_text.strip())
-            result_json["success"] = True
-            return result_json
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"API JSON formatında yanıt döndürmedi. Alınan yanıt: {response.text[:200]}..."
-            }
+
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[-2] if "```" in raw else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw)
+        result["success"] = True
+        return result
+
+    except json.JSONDecodeError:
+        return {"success": False, "error": f"AI JSON formatında yanıt vermedi: {response.text[:300]}"}
     except Exception as e:
+        return {"success": False, "error": f"Gemini API hatası: {str(e)}"}
+
+
+def read_student_identity(api_key, student_image):
+    """
+    Öğrenci kağıdındaki kimlik bilgilerini okur.
+    student_image: PIL Image
+    """
+    if not api_key:
+        return {"success": False, "error": "API anahtarı bulunamadı."}
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+
+        response = model.generate_content(
+            contents=[IDENTITY_PROMPT, student_image],
+            generation_config={"response_mime_type": "application/json"}
+        )
+
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw)
+        result["success"] = True
+        return result
+
+    except json.JSONDecodeError:
         return {
-            "success": False,
-            "error": f"Gemini API hatası oluştu: {str(e)}"
+            "success": True,
+            "name": "Bilinmeyen Öğrenci",
+            "no": "0",
+            "class": "Bilinmiyor"
         }
+    except Exception as e:
+        return {"success": False, "error": f"Gemini API hatası: {str(e)}"}
+
+
+def evaluate_student_paper(api_key, answer_key_images, student_image, questions_dict):
+    """
+    Öğrencinin kağıdını cevap anahtarıyla karşılaştırarak puanlar.
+    answer_key_images: list of PIL Image (cevap anahtarı sayfaları)
+    student_image: PIL Image (öğrenci kağıdı)
+    questions_dict: dict (soru yapısı - soru no → {title, max_score, correct_solution})
+    """
+    if not api_key:
+        return {"success": False, "error": "API anahtarı bulunamadı."}
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=EVALUATION_SYSTEM_PROMPT
+        )
+
+        # Soru yapısını metne dök
+        questions_text = "SINAV SORU YAPISI (Cevap anahtarından okunacak):\n"
+        for q_id, q_info in questions_dict.items():
+            questions_text += f"- Soru {q_id}: Maksimum {q_info['max_score']} puan\n"
+
+        prompt = f"""
+Sana {len(answer_key_images)} sayfalık CEVAP ANAHTARI ve 1 ÖĞRENCI KAĞIDI gönderiyorum.
+
+{questions_text}
+
+Lütfen:
+1. Cevap anahtarındaki her soruyu ve doğru çözümü analiz et.
+2. Öğrenci kağıdındaki her sorunun çözümünü oku.
+3. Her soruyu karşılaştırarak adil bir puan ver.
+4. JSON formatında döndür.
+
+GÖRSELLER SIRASI: Önce cevap anahtarı sayfaları, en son öğrenci kağıdı.
+"""
+
+        contents = [prompt] + answer_key_images + [student_image]
+        response = model.generate_content(
+            contents=contents,
+            generation_config={"response_mime_type": "application/json"}
+        )
+
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw)
+        result["success"] = True
+        return result
+
+    except json.JSONDecodeError:
+        return {"success": False, "error": f"AI JSON formatında yanıt vermedi: {response.text[:300]}"}
+    except Exception as e:
+        return {"success": False, "error": f"Gemini API hatası: {str(e)}"}
+
+
+# Legacy fallback - eski kodla uyumluluk
+def evaluate_entire_exam_page(api_key, paper_image, questions_dict):
+    return evaluate_student_paper(api_key, [], paper_image, questions_dict)
 
 def evaluate_math_paper(api_key, paper_image, question_text, correct_answer, max_score):
-    """
-    Fallback function for single question evaluation.
-    Converts inputs to a single question dictionary and calls evaluate_entire_exam_page.
-    """
-    mock_dict = {
-        "1": {
-            "title": "Soru",
-            "desc": question_text,
-            "correct_solution": correct_answer,
-            "max_score": max_score
-        }
-    }
-    result = evaluate_entire_exam_page(api_key, paper_image, mock_dict)
-    if result.get("success") and "grades" in result:
-        # Tek soruluk sonuca indirge
-        q_result = result["grades"].get("1")
-        if q_result:
-            q_result["success"] = True
-            return q_result
-    return result
+    mock_dict = {"1": {"title": "Soru", "max_score": max_score, "correct_solution": correct_answer}}
+    return evaluate_student_paper(api_key, [], paper_image, mock_dict)

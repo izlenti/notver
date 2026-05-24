@@ -1,760 +1,677 @@
 # app.py
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 from PIL import Image
 import os
 import json
+import io
 
-# Yerel modüllerin içe aktarılması
-from mock_data import MOCK_EXAM, MOCK_STUDENTS, get_student_solution_image
 from utils import (
-    initialize_session_state, 
-    get_class_dataframe, 
-    get_detailed_grades_dataframe,
-    save_teacher_approval, 
-    check_student_all_approved,
-    get_calibration_analytics
+    initialize_session_state,
+    get_approved_grades_dataframe,
+    get_all_students_dataframe,
 )
-from gemini_integration import evaluate_math_paper
+from gemini_integration import (
+    read_answer_key,
+    read_student_identity,
+    evaluate_student_paper,
+)
 
-# 1. Streamlit Sayfa Yapılandırması
+# ═══════════════════════════════════════════════════════
+# 1. Sayfa Yapılandırması
+# ═══════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Matematik Sınavı AI Notlandırma Sistemi",
+    page_title="Sınav AI Notlandırma",
     page_icon="📐",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
-# 2. Özel CSS Enjeksiyonu (Premium Koyu Tema ve Cam Morfolojisi)
-if os.path.exists("styles.css"):
-    with open("styles.css", encoding="utf-8") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-else:
-    # Eğer dosya yolu ile ilgili bir sorun çıkarsa yedek olarak CSS'i doğrudan yükle
-    st.markdown("""
-        <style>
-        html, body, [data-testid="stAppViewContainer"] {
-            background-color: #0d0e15 !important;
-            color: #f1f3f9 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+# ═══════════════════════════════════════════════════════
+# 2. CSS Yükleme
+# ═══════════════════════════════════════════════════════
+_css_path = os.path.join(os.path.dirname(__file__), "styles.css")
+if os.path.exists(_css_path):
+    with open(_css_path, encoding="utf-8") as _f:
+        st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 
-# 3. Veritabanı ve Oturum Durumu Başlatma
-initialize_session_state(MOCK_EXAM, MOCK_STUDENTS)
+# ═══════════════════════════════════════════════════════
+# 3. Session State Başlatma
+# ═══════════════════════════════════════════════════════
+initialize_session_state()
 
-# 4. Üst Başlık Paneli (Gradient Banner)
-st.markdown("""
-    <div style='text-align: center; padding: 15px 0px 30px 0px;'>
-        <h1 class='gradient-text' style='font-size: 2.8rem; margin-bottom: 0px;'>📐 MATEMATİK SINAVI AI NOTLANDIRMA</h1>
-        <p style='color: #94a3b8; font-size: 1.1rem; margin-top: 5px;'>Optik Okuma, Metin Tanıma (OCR) ve Adım Adım Mantık Analizli Değerlendirme Sistemi</p>
-    </div>
-""", unsafe_allow_html=True)
-
-# API Key Otomatik Algılama
+# ═══════════════════════════════════════════════════════
+# 4. API Key Tespiti
+# ═══════════════════════════════════════════════════════
 api_key = ""
 try:
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    elif "gemini_api_key" in st.secrets:
-        api_key = st.secrets["gemini_api_key"]
-    elif "api_key" in st.secrets:
-        api_key = st.secrets["api_key"]
+    for _k in ("GEMINI_API_KEY", "gemini_api_key", "api_key"):
+        if _k in st.secrets:
+            api_key = st.secrets[_k]
+            break
 except Exception:
     pass
-
-# Eğer secrets içinde yoksa, kullanıcının manuel girdiğini al
 if not api_key:
     api_key = st.session_state.get("user_api_key", "")
 
-# 5. Sınıf / Şube Seçimi ve Sınav İstatistik Özeti (Yan Yana İki Dropdown Filtresi)
-grades = ["5", "6", "7", "8"]
-branches = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
+# ═══════════════════════════════════════════════════════
+# 5. Üst Başlık
+# ═══════════════════════════════════════════════════════
+st.markdown("""
+<div style='text-align:center; padding: 10px 0 18px 0;'>
+    <h1 class='gradient-text' style='font-size:2.2rem; margin:0;'>📐 Sınav AI Notlandırma</h1>
+    <p style='color:#475569; font-size:0.95rem; margin:4px 0 0 0;'>
+        Cevap anahtarı yükle → Öğrenci kağıtlarını tara → Yapay zeka puanlasın
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
-st.markdown("<h4 style='margin:0 0 10px 0; color:#a78bfa; font-family:\"Outfit\", sans-serif;'>🏫 Aktif Sınıf & Şube Filtresi</h4>", unsafe_allow_html=True)
-col_h1, col_h2 = st.columns(2)
-with col_h1:
-    selected_branch = st.selectbox(
-        "Şube Seçimi",
-        ["Tümü"] + branches,
-        help="Filtrelemek istediğiniz şubeyi seçiniz."
-    )
-with col_h2:
-    selected_grade = st.selectbox(
-        "Sınıf Seviyesi Seçimi",
-        ["Tümü"] + grades,
-        help="Filtrelemek istediğiniz sınıf seviyesini seçiniz."
-    )
+# ═══════════════════════════════════════════════════════
+# 6. Sekme Yönetimi (URL query params)
+# ═══════════════════════════════════════════════════════
+TABS = [
+    ("cevap_anahtari",  "📐", "Cevap Anahtarı"),
+    ("sinav_kagidi",    "📷", "Sınav Kağıdı"),
+    ("ai_degerlendirme","🧠", "AI Değerlendirme"),
+    ("not_cizelgesi",   "📋", "Not Çizelgesi"),
+]
 
-# İstatistik özetini hesaplama ve filtreleme fonksiyonu
-student_df = get_class_dataframe()
-
-def filter_dataframe_by_class(df):
-    if df.empty:
-        return df
-    filtered_df = df.copy()
-    if selected_branch != "Tümü":
-        filtered_df = filtered_df[filtered_df["Sınıf"].apply(lambda x: str(x).split("-")[-1] == selected_branch if "-" in str(x) else False)]
-    if selected_grade != "Tümü":
-        filtered_df = filtered_df[filtered_df["Sınıf"].apply(lambda x: str(x).split("-")[0] == selected_grade if "-" in str(x) else False)]
-    return filtered_df
-
-filtered_student_df = filter_dataframe_by_class(student_df)
-
-total_students = len(filtered_student_df)
-approved_count = len(filtered_student_df[filtered_student_df["Durum"] == "Onaylandı"]) if total_students > 0 else 0
-avg_score = filtered_student_df["Toplam Puan"].mean() if total_students > 0 else 0.0
-
-# 6. Mobil / Masaüstü Arayüz Navigasyonu (Windows 11 Görev Çubuğu Dock Tarzı - Native Streamlit Buttons)
-if "active_tab" not in st.session_state:
-    st.session_state.active_tab = "cevap_anahtari"
-
-# Query Parametrelerinden Aktif Sekmeyi Oku
-if "tab" in st.query_params:
-    st.session_state.active_tab = st.query_params["tab"]
+# Query param'dan sekmeyi oku (sayfa yenileme veya link paylaşımı için)
+_qp = st.query_params.get("tab", "")
+if _qp and _qp in [t[0] for t in TABS]:
+    st.session_state.active_tab = _qp
 
 active = st.session_state.active_tab
 
-# CSS ile Yüzen Dock yapabilmek için özel nav-marker elemanı
-st.markdown('<div id="nav-marker"></div>', unsafe_allow_html=True)
+# ═══════════════════════════════════════════════════════
+# 7. Windows 11 Dock (Saf HTML — target="_self" ile)
+# ═══════════════════════════════════════════════════════
+def _dock_items():
+    items = ""
+    for tab_id, emoji, label in TABS:
+        cls = "dock-item nav-active" if active == tab_id else "dock-item"
+        items += f"""
+        <a href="?tab={tab_id}" class="{cls}" target="_self">
+            <span class="dock-label">{label}</span>
+            {emoji}
+        </a>"""
+    return items
 
-# Native Streamlit Butonlarıyla Yüzen Navigasyon Çubuğu
-nav_cols = st.columns(4)
-tabs_data = [
-    ("cevap_anahtari", "📐", "Cevap Anahtarı & Soru Ayarları"),
-    ("ogrenci_tarama", "📷", "Öğrenci Kağıdı Giriş & Tarama"),
-    ("ai_degerlendirme", "🧠", "Yapay Zeka Değerlendirme & Denetim"),
-    ("not_defteri", "📋", "Sınav Sonuç Not Defteri")
-]
+st.markdown(f"""
+<div class="win11-dock">
+    {_dock_items()}
+</div>
+""", unsafe_allow_html=True)
 
-for idx, (tab_id, emoji, help_text) in enumerate(tabs_data):
-    with nav_cols[idx]:
-        is_active = (active == tab_id)
-        btn_type = "primary" if is_active else "secondary"
-        if st.button(emoji, key=f"btn_nav_{tab_id}", type=btn_type, help=help_text):
-            st.session_state.active_tab = tab_id
-            st.query_params["tab"] = tab_id
-            st.rerun()
+# ═══════════════════════════════════════════════════════
+# YARDIMCI FONKSİYONLAR
+# ═══════════════════════════════════════════════════════
+GRADES   = ["5", "6", "7", "8"]
+BRANCHES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 
-# ==================== VIEW 1: CEVAP ANAHTARI ====================
-if st.session_state.active_tab == "cevap_anahtari":
-    st.markdown("<h3 style='margin-bottom: 10px;'>📐 Sınav ve Dinamik Puanlama Tanımları</h3>", unsafe_allow_html=True)
-    
-    # 🔑 Google Gemini API Ayarları (Yalnızca Secrets'ta yoksa gösterilir!)
+def _api_warning():
+    """API anahtarı yoksa uyarı ve giriş kutusu göster."""
     if not api_key:
-        with st.expander("🔑 Google Gemini API Ayarları (Manuel Giriş)", expanded=True):
-            st.warning("⚠️ Bulut ayarlarında (Streamlit Secrets) API anahtarı bulunamadı. Lütfen aşağıdan manuel girin:")
-            user_key = st.text_input("Google AI Studio API Key", type="password", value=st.session_state.get("user_api_key", ""), placeholder="AIzaSy...")
-            if user_key:
-                st.session_state.user_api_key = user_key
+        with st.expander("🔑 Google Gemini API Anahtarı Gerekli", expanded=True):
+            st.warning("Streamlit Secrets'ta API anahtarı bulunamadı. Lütfen aşağıya giriniz:")
+            typed = st.text_input("API Key", type="password",
+                                   value=st.session_state.get("user_api_key", ""),
+                                   placeholder="AIzaSy...")
+            if typed:
+                st.session_state.user_api_key = typed
                 st.rerun()
-                
-    st.write("Sınav sorularının detaylarını, cevap anahtarını ve her soruya ait **maksimum puan değerini** ayarlayabilirsiniz. Gemini AI bu puanları baz alarak alt rubrikleri otomatik ölçeklendirecektir.")
-    
-    # Örnek veri yükleyici butonu (Doldurulabilir Demo Modu)
-    st.markdown("<h5>🧪 Hızlı Prototip ve Demo Araçları</h5>", unsafe_allow_html=True)
-    col_demo1, col_demo2 = st.columns([3, 1])
-    with col_demo1:
-        st.write("Uygulamayı sıfır konfigürasyonla anında test etmek için hazır geometri sorularını ve öğrenci kağıtlarını yükleyebilirsiniz:")
-    with col_demo2:
-        if st.button("🧪 Örnek Soru & Öğrenci Yükle", key="btn_load_mock_data", use_container_width=True):
-            # Örnek soruları yükle
-            st.session_state.exam_config = json.loads(json.dumps(MOCK_EXAM))
-            # Örnek öğrencileri yükle
-            st.session_state.student_records = json.loads(json.dumps(MOCK_STUDENTS))
-            st.success("Tebrikler! Örnek sınav soruları ve öğrenci yazılıları başarıyla yüklendi.")
+        return False
+    return True
+
+def _status_badge(status):
+    cls_map = {
+        "Onaylandı": "status-approved",
+        "Değerlendirildi": "status-evaluated",
+        "Bekliyor": "status-pending",
+    }
+    cls = cls_map.get(status, "status-pending")
+    return f"<span class='status-badge {cls}'>{status}</span>"
+
+def _pil_to_bytes(img):
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ╔═══════════════════════════════════════════════════════╗
+# ║  TAB 1 — CEVAP ANAHTARI                              ║
+# ╚═══════════════════════════════════════════════════════╝
+if active == "cevap_anahtari":
+    st.markdown("## 📐 Cevap Anahtarı Yükleme")
+    st.markdown("""
+    <div class='callout-info'>
+        Sınav kağıdının <strong>cevap anahtarını</strong> görsel olarak yükleyin.  
+        Yapay zeka soruları, doğru cevapları ve puan değerlerini görselden otomatik okuyacaktır.
+    </div>
+    """, unsafe_allow_html=True)
+
+    cfg = st.session_state.exam_config
+
+    # ── Sınıf & Şube seçimi ──
+    col1, col2 = st.columns(2)
+    with col1:
+        sel_grade = st.selectbox("Sınıf", GRADES,
+                                  index=GRADES.index(cfg["grade"]) if cfg["grade"] in GRADES else 0,
+                                  key="ca_grade")
+    with col2:
+        sel_branch = st.selectbox("Şube", BRANCHES,
+                                   index=BRANCHES.index(cfg["branch"]) if cfg["branch"] in BRANCHES else 0,
+                                   key="ca_branch")
+
+    st.session_state.exam_config["grade"] = sel_grade
+    st.session_state.exam_config["branch"] = sel_branch
+
+    st.markdown("---")
+
+    # ── Dosya Yükleme ──
+    st.markdown("### 📤 Cevap Anahtarı Görselleri")
+    st.write("Sınavınızın cevap anahtarını yükleyin. Birden fazla sayfa varsa hepsini seçebilirsiniz.")
+
+    uploaded_keys = st.file_uploader(
+        "Cevap anahtarı görseli (PNG, JPG) — birden fazla sayfa seçilebilir",
+        type=["png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key="uploader_answer_key"
+    )
+
+    if uploaded_keys:
+        st.markdown(f"**{len(uploaded_keys)} sayfa yüklendi.** Önizleme:")
+        preview_cols = st.columns(min(len(uploaded_keys), 4))
+        pil_images = []
+        for i, f in enumerate(uploaded_keys):
+            img = Image.open(f).convert("RGB")
+            pil_images.append(img)
+            with preview_cols[i % 4]:
+                st.image(img, use_container_width=True, caption=f"Sayfa {i+1}")
+
+        st.markdown("---")
+
+        col_save, col_ai = st.columns([1, 2])
+
+        with col_save:
+            if st.button("💾 Görselleri Kaydet (AI Okuma Olmadan)", use_container_width=True):
+                st.session_state.exam_config["answer_key_images"] = pil_images
+                st.session_state.exam_config["key_saved"] = True
+                st.session_state.exam_config["questions"] = {}
+                st.success("Cevap anahtarı görselleri kaydedildi. Öğrenci değerlendirmesinde AI bu görseli kullanacak.")
+
+        with col_ai:
+            if st.button("🤖 AI ile Oku ve Soru Yapısını Çıkar (Önerilen)", type="primary", use_container_width=True):
+                if not _api_warning():
+                    st.stop()
+                with st.spinner("Gemini AI cevap anahtarını okuyup soruları çıkartıyor..."):
+                    result = read_answer_key(api_key, pil_images)
+
+                if result.get("success"):
+                    st.session_state.exam_config["answer_key_images"] = pil_images
+                    st.session_state.exam_config["questions"] = result.get("questions", {})
+                    st.session_state.exam_config["total_max_score"] = result.get("total_max_score", 0)
+                    st.session_state.exam_config["key_saved"] = True
+                    st.success("✅ Cevap anahtarı başarıyla okundu!")
+
+                    qs = result.get("questions", {})
+                    if qs:
+                        st.markdown("**AI'ın Tespit Ettiği Sorular:**")
+                        for qid, qinfo in qs.items():
+                            st.markdown(f"- **Soru {qid}:** {qinfo.get('title', '')} — **{qinfo.get('max_score', 0)} Puan**")
+                        st.markdown(f"**Toplam:** {result.get('total_max_score', 0)} Puan")
+                else:
+                    st.error(f"Hata: {result.get('error')}")
+
+    # ── Mevcut durumu göster ──
+    if cfg.get("key_saved") and cfg.get("answer_key_images"):
+        st.markdown("---")
+        st.markdown(f"""
+        <div class='callout-success'>
+            ✅ <strong>Cevap anahtarı yüklü!</strong>
+            Sınıf: <strong>{cfg['grade']}</strong> &nbsp;|&nbsp;
+            Şube: <strong>{cfg['branch']}</strong> &nbsp;|&nbsp;
+            {len(cfg['answer_key_images'])} sayfa &nbsp;|&nbsp;
+            {len(cfg.get('questions', {}))} soru tespit edildi
+        </div>
+        """, unsafe_allow_html=True)
+
+        if cfg.get("questions"):
+            with st.expander("📋 Tespit Edilen Soru Yapısı (Düzenle)", expanded=False):
+                qs = cfg["questions"]
+                for qid in sorted(qs.keys(), key=lambda x: int(x) if x.isdigit() else x):
+                    q = qs[qid]
+                    with st.expander(f"Soru {qid} — {q.get('max_score', 0)} Puan", expanded=False):
+                        new_max = st.number_input(f"Maksimum Puan (Soru {qid})",
+                                                   min_value=1, max_value=200,
+                                                   value=int(q.get("max_score", 10)),
+                                                   key=f"edit_max_{qid}")
+                        new_sol = st.text_area(f"Doğru Çözüm / Notlar (Soru {qid})",
+                                               value=q.get("correct_solution", ""),
+                                               height=80, key=f"edit_sol_{qid}")
+                        if new_max != q.get("max_score") or new_sol != q.get("correct_solution"):
+                            st.session_state.exam_config["questions"][qid]["max_score"] = new_max
+                            st.session_state.exam_config["questions"][qid]["correct_solution"] = new_sol
+
+        if st.button("🗑️ Cevap Anahtarını Sıfırla", key="reset_answer_key"):
+            st.session_state.exam_config = {
+                "grade": "", "branch": "", "answer_key_images": [],
+                "questions": {}, "total_max_score": 0, "key_saved": False,
+            }
+            st.rerun()
+    elif not uploaded_keys:
+        st.markdown("""
+        <div class='callout-warn'>
+            ⚠️ Henüz cevap anahtarı yüklenmedi. Yukarıdan sınav cevap anahtarı görselini yükleyin.
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ╔═══════════════════════════════════════════════════════╗
+# ║  TAB 2 — SINAV KAĞIDI YÜKLEME                        ║
+# ╚═══════════════════════════════════════════════════════╝
+elif active == "sinav_kagidi":
+    st.markdown("## 📷 Sınav Kağıdı Yükleme")
+
+    cfg = st.session_state.exam_config
+    if not cfg.get("key_saved"):
+        st.markdown("""
+        <div class='callout-warn'>
+            ⚠️ Önce <strong>Cevap Anahtarı</strong> sekmesinden cevap anahtarını yüklemelisiniz!
+        </div>
+        """, unsafe_allow_html=True)
+        st.stop()
+
+    st.markdown(f"""
+    <div class='callout-info'>
+        Aktif sınıf: <strong>{cfg['grade']}-{cfg['branch']}</strong> &nbsp;|&nbsp;
+        Cevap anahtarı: <strong>{len(cfg['answer_key_images'])} sayfa</strong> hazır.
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    Öğrenci sınav kağıtlarını **kameradan çekerek** veya **galeriden seçerek** yükleyin.  
+    Yapay zeka kağıttaki **Ad Soyad**, **Numara** ve **Sınıf** bilgilerini otomatik okuyacaktır.
+    """)
+
+    st.markdown("---")
+
+    # ── Yükleme yöntemi seçimi ──
+    method = st.radio("Yükleme yöntemi:", ["📁 Galeriden Seç", "📷 Kameradan Çek"],
+                      horizontal=True, key="upload_method")
+
+    student_image = None
+    if method == "📁 Galeriden Seç":
+        uploaded = st.file_uploader(
+            "Öğrenci sınav kağıdı (PNG, JPG)",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_student_gallery"
+        )
+        if uploaded:
+            student_image = Image.open(uploaded).convert("RGB")
+    else:
+        cam = st.camera_input("Kağıdı hizalayın ve çekin", key="cam_student")
+        if cam:
+            student_image = Image.open(cam).convert("RGB")
+
+    if student_image:
+        st.markdown("---")
+        col_prev, col_action = st.columns([1, 1])
+        with col_prev:
+            st.markdown("**Yüklenen Görsel:**")
+            st.image(student_image, use_container_width=True)
+
+        with col_action:
+            st.markdown("**İşlemler:**")
+            st.info("Butona basınca AI kağıttaki öğrenci bilgilerini (ad, numara, sınıf) okuyacak ve sisteme kaydedecektir.")
+
+            if not _api_warning():
+                st.stop()
+
+            if st.button("🤖 Yapay Zeka ile Yükle ve Tanı", type="primary", use_container_width=True):
+                with st.spinner("Gemini AI öğrenci kimliğini kağıttan okuyor..."):
+                    id_result = read_student_identity(api_key, student_image)
+
+                if not id_result.get("success"):
+                    st.error(f"Hata: {id_result.get('error')}")
+                else:
+                    name    = id_result.get("name", "Bilinmeyen Öğrenci").strip()
+                    no      = id_result.get("no", "0").strip()
+                    s_class = id_result.get("class", cfg["grade"]).strip()
+
+                    # Numara çakışmasını önle
+                    if not no or no == "0":
+                        no = str(len(st.session_state.student_records) + 1001)
+
+                    # Branş'ı sınıf config'den al
+                    branch = cfg.get("branch", "")
+
+                    # Kaydet
+                    st.session_state.student_records[no] = {
+                        "name": name,
+                        "no": no,
+                        "class": s_class,
+                        "branch": branch,
+                        "status": "Bekliyor",
+                        "grades": {},
+                        "total_score": 0,
+                    }
+                    st.session_state.student_images[no] = student_image
+
+                    st.success(f"""
+                    ✅ **Öğrenci başarıyla eklendi!**  
+                    👤 Ad Soyad: **{name}**  
+                    🔢 Numara: **{no}**  
+                    🏫 Sınıf: **{s_class}-{branch}**
+                    """)
+                    st.rerun()
+
+    # ── Yüklenen öğrenciler listesi ──
+    records = st.session_state.student_records
+    if records:
+        st.markdown("---")
+        st.markdown(f"### 📋 Sisteme Yüklenen Öğrenciler ({len(records)} kişi)")
+
+        for no, rec in sorted(records.items(), key=lambda x: (int(x[0]) if x[0].isdigit() else x[0])):
+            col_info, col_del = st.columns([5, 1])
+            with col_info:
+                st.markdown(
+                    f"{_status_badge(rec['status'])} &nbsp; "
+                    f"**{rec.get('name', '—')}** &nbsp;|&nbsp; No: `{no}` &nbsp;|&nbsp; "
+                    f"{rec.get('class', '')}–{rec.get('branch', '')}",
+                    unsafe_allow_html=True
+                )
+            with col_del:
+                st.markdown('<div class="delete-btn">', unsafe_allow_html=True)
+                if st.button("🗑️", key=f"del_{no}", help=f"{rec.get('name')} sil"):
+                    del st.session_state.student_records[no]
+                    st.session_state.student_images.pop(no, None)
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class='callout-info' style='margin-top:20px;'>
+            Henüz hiç öğrenci eklenmedi. Yukarıdan öğrenci kağıtlarını yükleyin.
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ╔═══════════════════════════════════════════════════════╗
+# ║  TAB 3 — AI DEĞERLENDİRME                            ║
+# ╚═══════════════════════════════════════════════════════╝
+elif active == "ai_degerlendirme":
+    st.markdown("## 🧠 Yapay Zeka Değerlendirme")
+
+    cfg     = st.session_state.exam_config
+    records = st.session_state.student_records
+
+    if not cfg.get("key_saved"):
+        st.markdown("<div class='callout-warn'>⚠️ Önce Cevap Anahtarı sekmesinden cevap anahtarı yükleyin!</div>", unsafe_allow_html=True)
+        st.stop()
+
+    if not records:
+        st.markdown("<div class='callout-warn'>⚠️ Sisteme henüz öğrenci eklenmedi. Sınav Kağıdı sekmesinden öğrencileri ekleyin!</div>", unsafe_allow_html=True)
+        st.stop()
+
+    if not _api_warning():
+        st.stop()
+
+    # ── Tümünü Değerlendir butonu ──
+    bekleyen = [no for no, r in records.items() if r["status"] == "Bekliyor"]
+    if bekleyen:
+        st.markdown(f"**{len(bekleyen)} öğrenci** değerlendirilmeyi bekliyor.")
+        if st.button(f"🤖 Tüm Bekleyen Öğrencileri Değerlendir ({len(bekleyen)} kişi)",
+                     type="primary", use_container_width=True):
+            progress = st.progress(0, text="Değerlendirme başlıyor...")
+            for i, no in enumerate(bekleyen):
+                rec = records[no]
+                img = st.session_state.student_images.get(no)
+                if img is None:
+                    continue
+                progress.progress((i + 1) / len(bekleyen),
+                                   text=f"Değerlendiriliyor: {rec['name']} ({i+1}/{len(bekleyen)})")
+
+                result = evaluate_student_paper(
+                    api_key,
+                    cfg["answer_key_images"],
+                    img,
+                    cfg.get("questions", {})
+                )
+
+                if result.get("success"):
+                    grades_raw = result.get("grades", {})
+                    total = result.get("total_score", sum(g.get("score", 0) for g in grades_raw.values()))
+                    st.session_state.student_records[no]["grades"] = grades_raw
+                    st.session_state.student_records[no]["total_score"] = total
+                    st.session_state.student_records[no]["status"] = "Değerlendirildi"
+
+            progress.empty()
+            st.success("✅ Tüm öğrenciler değerlendirildi! Şimdi tek tek inceleyip onaylayabilirsiniz.")
             st.rerun()
 
     st.markdown("---")
 
-    questions_dict = st.session_state.exam_config.get("questions", {})
-    
-    if not questions_dict:
-        st.info("💡 Henüz tanımlanmış bir sınav sorusu bulunmamaktadır. Kendi sorunuzu eklemek için aşağıdaki 'Yeni Soru Ekle' formunu kullanabilir ya da üstteki 'Örnek Soru & Öğrenci Yükle' butonuyla test verilerini anında getirebilirsiniz.")
-    else:
-        # Soru düzenleme kartı
-        for q_id, q_info in list(questions_dict.items()):
-            with st.expander(f"🔍 {q_info['title']} ({q_info['max_score']} Puan)", expanded=(q_id == "21")):
-                col_left, col_right = st.columns([2, 1])
-                
-                with col_left:
-                    new_title = st.text_input(f"Soru Adı", value=q_info["title"], key=f"edit_title_{q_id}")
-                    new_desc = st.text_area(f"Soru Açıklaması", value=q_info["desc"], key=f"edit_desc_{q_id}", height=80)
-                    new_solution = st.text_area(f"Doğru Çözüm / Cevap Anahtarı", value=q_info["correct_solution"], key=f"edit_sol_{q_id}", height=120)
-                    
-                with col_right:
-                    # Dinamik Puan Ayarlaması
-                    new_max = st.number_input(
-                        f"Maksimum Puan Değeri", 
-                        min_value=5, 
-                        max_value=100, 
-                        value=int(q_info["max_score"]), 
-                        step=5, 
-                        key=f"edit_max_{q_id}"
-                    )
-                    
-                    # Rubrik Ağırlık Görselleştirmesi
-                    st.markdown(f"""
-                        **AI Alt Rubrik Dağılımı (Yüzde Oranları):**
-                        - **Kavramsal Yaklaşım (%40):** `{new_max * 0.40:.1f} Puan`
-                        - **İşlem Adımları (%40):** `{new_max * 0.40:.1f} Puan`
-                        - **Sonuç Doğruluğu (%20):** `{new_max * 0.20:.1f} Puan`
-                    """)
-                    
-                # Değişiklikleri Kaydet
-                if (new_title != q_info["title"] or new_desc != q_info["desc"] or 
-                    new_solution != q_info["correct_solution"] or new_max != q_info["max_score"]):
-                    
-                    st.session_state.exam_config["questions"][q_id]["title"] = new_title
-                    st.session_state.exam_config["questions"][q_id]["desc"] = new_desc
-                    st.session_state.exam_config["questions"][q_id]["correct_solution"] = new_solution
-                    st.session_state.exam_config["questions"][q_id]["max_score"] = new_max
-                    
-                    # Rubrik hesaplamalarını da güncelle
-                    st.session_state.exam_config["questions"][q_id]["rubric"] = {
-                        "concept": round(new_max * 0.40, 1),
-                        "steps": round(new_max * 0.40, 1),
-                        "result": round(new_max * 0.20, 1)
-                    }
-                    
-                    # Gerçek zamanlı öğrenci puanı ölçeklendirmesi
-                    old_max = q_info["max_score"]
-                    scale_factor = new_max / old_max
-                    
-                    for s_id, s_record in st.session_state.student_records.items():
-                        if q_id in s_record["grades"]:
-                            grade_data = s_record["grades"][q_id]
-                            
-                            grade_data["score_concept"] = min(round(grade_data["score_concept"] * scale_factor, 1), new_max * 0.4)
-                            grade_data["score_steps"] = min(round(grade_data["score_steps"] * scale_factor, 1), new_max * 0.4)
-                            grade_data["score_result"] = min(round(grade_data["score_result"] * scale_factor, 1), new_max * 0.2)
-                            
-                            new_total = round(grade_data["score_concept"] + grade_data["score_steps"] + grade_data["score_result"], 1)
-                            grade_data["score_total"] = new_total
-                            grade_data["teacher_score"] = new_total
-                            grade_data["ai_score_initial"] = new_total
-                    
-                    st.success(f"{q_info['title']} ayarları ve öğrenci puanları dinamik olarak güncellendi!")
-                    st.rerun()
+    # ── Öğrenci listesi + Detay paneli ──
+    sorted_nos = sorted(records.keys(),
+                        key=lambda x: (int(x) if x.isdigit() else x))
 
-    # ➕ Yeni Soru Ekleme Formu
-    st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("➕ Yeni Soru Ekle", expanded=False):
-        with st.form("new_question_form", clear_on_submit=True):
-            new_q_id = st.text_input("Soru No (Örn: 21, 22 veya 1, 2)", placeholder="21")
-            new_q_title = st.text_input("Soru Adı", placeholder="Soru 21: Çokgenler")
-            new_q_desc = st.text_area("Soru Metni / Açıklaması", placeholder="Bir dış açısı 15 derece olan çokgen...")
-            new_q_sol = st.text_area("Doğru Çözüm / Cevap Anahtarı", placeholder="360 / 15 = 24 kenarlıdır.")
-            new_q_max = st.number_input("Maksimum Puan", min_value=5, max_value=100, value=20, step=5)
-            
-            submit_question = st.form_submit_button("Soruyu Sınava Ekle")
-            if submit_question:
-                if not new_q_id.strip() or not new_q_title.strip():
-                    st.error("Lütfen en azından Soru No ve Soru Adı alanlarını doldurunuz!")
-                else:
-                    st.session_state.exam_config["questions"][new_q_id] = {
-                        "title": new_q_title,
-                        "desc": new_q_desc,
-                        "max_score": new_q_max,
-                        "correct_solution": new_q_sol,
-                        "rubric": {
-                            "concept": round(new_q_max * 0.40, 1),
-                            "steps": round(new_q_max * 0.40, 1),
-                            "result": round(new_q_max * 0.20, 1)
-                        }
-                    }
-                    st.success(f"{new_q_title} başarıyla eklendi!")
-                    st.rerun()
+    # Aktif öğrenci session state
+    if "selected_student_no" not in st.session_state:
+        st.session_state.selected_student_no = sorted_nos[0] if sorted_nos else None
 
-    # Sınav Evrakları Yükleme Paneli
-    st.markdown("---")
-    st.markdown("<h4>📤 Toplu Sınav Cevap Anahtarı Yükleme</h4>", unsafe_allow_html=True)
-    st.write("Yazılı geometri sınavının el çizimli veya metin tabanlı cevap anahtarını buraya yükleyerek AI'ın doğru çözümleri otomatik güncellemesini sağlayabilirsiniz.")
-    
-    uploaded_key = st.file_uploader(
-        "Cevap Anahtarı Görseli Yükleyin (AI bu anahtarı okuyup soru çözümlerini otomatik doldurur)",
-        type=["png", "jpg", "jpeg", "pdf"],
-        key="key_uploader_cevap"
-    )
-    if uploaded_key:
-        st.success("Cevap anahtarı görseli başarıyla yüklendi! Gemini OCR ile soru çözümleri güncellendi.")
+    col_list, col_detail = st.columns([1, 2])
 
-# ==================== VIEW 2: KAĞIT TARAMA ====================
-elif st.session_state.active_tab == "ogrenci_tarama":
-    st.markdown("<h3 style='margin-bottom: 10px;'>📷 Öğrenci Kağıdı Giriş ve Kamera Tarama</h3>", unsafe_allow_html=True)
-    st.write("Yapay zeka, kağıt üzerindeki **Adı-Soyadı, Okul Numarası ve Sınıfı/Şubesi** bilgilerini doğrudan kağıttan okuyacaktır. Önceden öğrenci tanımlamanıza veya listeden seçmenize gerek yoktur.")
-    
-    # Yan yana iki seçenek (Kamera ve Dosya Yükleme)
-    scan_col1, scan_col2 = st.columns(2)
-    camera_photo = None
-    file_photo = None
-    
-    with scan_col1:
-        st.markdown("<div class='premium-card' style='text-align:center;'>", unsafe_allow_html=True)
-        st.markdown("<h5>📷 Telefon Kamerası ile Çek</h5>", unsafe_allow_html=True)
-        camera_photo = st.camera_input("Öğrenci Kağıdını Hizalayıp Çekin", key="cam_tarama_input")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-    with scan_col2:
-        st.markdown("<div class='premium-card' style='text-align:center;'>", unsafe_allow_html=True)
-        st.markdown("<h5>📤 Galeriden/Cihazdan Yükle</h5>", unsafe_allow_html=True)
-        file_photo = st.file_uploader("Kağıt Görselini Seçin veya Bırakın", type=["png", "jpg", "jpeg"], key="file_tarama_input")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-    active_image = None
-    if camera_photo:
-        active_image = Image.open(camera_photo)
-    elif file_photo:
-        active_image = Image.open(file_photo)
-        
-    if active_image:
-        st.markdown("---")
-        st.markdown("<h5>🖼️ Taranan Görsel Önizleme</h5>", unsafe_allow_html=True)
-        st.image(active_image, use_container_width=True, caption="Yüklenen Öğrenci Kağıdı")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        if not api_key:
-            st.info("💡 Puanlamayı başlatmak için lütfen sol menüden Google Gemini API Anahtarınızı giriniz veya Secrets tanımını yapınız.")
-        else:
-            if st.button("🤖 Yapay Zeka ile Analiz Et & Not Defterine Kaydet", key="btn_eval_new_paper", use_container_width=True):
-                with st.spinner("Gemini 1.5 Flash el yazısı öğrenci kimliğini okuyor, geometri şekillerini analiz ediyor ve puanlıyor..."):
-                    ai_result = evaluate_entire_exam_page(
-                        api_key, 
-                        active_image, 
-                        st.session_state.exam_config["questions"]
-                    )
-                    
-                    if ai_result.get("success"):
-                        student_info = ai_result.get("student_info", {})
-                        name = student_info.get("name", "Bilinmeyen Öğrenci").strip()
-                        s_class = student_info.get("class", "5-A").strip().upper()
-                        s_no = student_info.get("no", "").strip()
-                        
-                        # Okul no okunamadıysa dinamik eşsiz ID üret
-                        if not s_no or s_no == "Bilinmeyen No":
-                            s_no = str(len(st.session_state.student_records) + 101)
-                            
-                        # Öğrenci kaydını dinamik olarak oluştur (Sıfır Konfigürasyon Sihri)
-                        st.session_state.student_records[s_no] = {
-                            "id": s_no,
-                            "name": name,
-                            "class": s_class,
-                            "status": "Bekliyor",
-                            "grades": {}
-                        }
-                        
-                        # Puanları yerleştir
-                        for q_id, q_res in ai_result["grades"].items():
-                            st.session_state.student_records[s_no]["grades"][q_id] = {
-                                "score_concept": q_res["score_concept"],
-                                "score_steps": q_res["score_steps"],
-                                "score_result": q_res["score_result"],
-                                "score_total": q_res["score_total"],
-                                "ai_feedback": q_res["ai_feedback"],
-                                "student_solution": q_res.get("detected_text", "Okundu."),
-                                "teacher_override": False,
-                                "teacher_score": q_res["score_total"],
-                                "ai_score_initial": q_res["score_total"]
-                            }
-                            
-                        # Görseli de saklayalım
-                        st.session_state[f"custom_img_{s_no}"] = active_image
-                        
-                        st.success(f"🎉 Başarıyla Tamamlandı! AI Öğrenciyi Kağıttan Tanıdı:\n"
-                                   f"- **Öğrenci:** {name}\n"
-                                   f"- **Okul No:** {s_no}\n"
-                                   f"- **Sınıfı:** {s_class}\n"
-                                   f"Değerlendirme ekranına yönlendiriliyorsunuz...")
-                        
-                        # Değerlendirme sekmesine otomatik yönlendir
-                        st.session_state.active_tab = "ai_degerlendirme"
+    # Sol: Öğrenci listesi
+    with col_list:
+        st.markdown("**Öğrenci Listesi**")
+        for no in sorted_nos:
+            rec = records[no]
+            is_active = (no == st.session_state.selected_student_no)
+            card_cls = "student-card active" if is_active else "student-card"
+
+            # HTML kart ama tıklama için buton
+            if st.button(
+                f"{rec.get('name', '—')} | No: {no}\n{rec['status']}",
+                key=f"sel_{no}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary"
+            ):
+                st.session_state.selected_student_no = no
+                st.rerun()
+
+    # Sağ: Detay paneli
+    with col_detail:
+        sel_no = st.session_state.selected_student_no
+        if sel_no and sel_no in records:
+            rec = records[sel_no]
+            img = st.session_state.student_images.get(sel_no)
+
+            st.markdown(f"### 👤 {rec.get('name', '—')}")
+            st.markdown(
+                f"No: **{sel_no}** &nbsp;|&nbsp; "
+                f"Sınıf: **{rec.get('class', '')}–{rec.get('branch', '')}** &nbsp;|&nbsp; "
+                f"{_status_badge(rec['status'])}",
+                unsafe_allow_html=True
+            )
+
+            # Değerlendir butonu (tek öğrenci)
+            if rec["status"] == "Bekliyor":
+                if img and st.button("🤖 Bu Öğrenciyi Değerlendir", use_container_width=True):
+                    with st.spinner(f"{rec['name']} değerlendiriliyor..."):
+                        result = evaluate_student_paper(
+                            api_key,
+                            cfg["answer_key_images"],
+                            img,
+                            cfg.get("questions", {})
+                        )
+                    if result.get("success"):
+                        grades_raw = result.get("grades", {})
+                        total = result.get("total_score", sum(g.get("score", 0) for g in grades_raw.values()))
+                        st.session_state.student_records[sel_no]["grades"] = grades_raw
+                        st.session_state.student_records[sel_no]["total_score"] = total
+                        st.session_state.student_records[sel_no]["status"] = "Değerlendirildi"
+                        st.success("✅ Değerlendirme tamamlandı!")
                         st.rerun()
                     else:
-                        st.error(f"Hata: {ai_result.get('error')}")
+                        st.error(f"Hata: {result.get('error')}")
+                elif not img:
+                    st.warning("Bu öğrenciye ait görsel bulunamadı.")
 
-# ==================== VIEW 3: AI DEĞERLENDİRME ====================
-elif st.session_state.active_tab == "ai_degerlendirme":
-    st.markdown("<h3 style='margin-bottom: 10px;'>🧠 Yapay Zeka Değerlendirme ve Öğretmen Denetimi</h3>", unsafe_allow_html=True)
-    
-    if not st.session_state.student_records:
-        st.markdown("""
-            <div class='premium-card' style='text-align:center; padding: 40px;'>
-                <h4 style='color:#a78bfa;'>ℹ️ Değerlendirilecek Kağıt Bulunmamaktadır</h4>
-                <p style='color:#94a3b8; font-size:1.05rem;'>Notlandırma sisteminde henüz okutulmuş/taranmış bir yazılı kağıdı yok.</p>
-                <p style='color:#6366f1; font-weight:600;'>Başlamak için lütfen en alttaki yüzen görev çubuğundan 📷 Kağıt Tarama ikonuna tıklayarak ilk kağıdı okutun!</p>
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.write("Gemini AI tarafından taranıp puanlanan el yazısı çözümleri, geometri çizimlerini ve puan kırılma mantığını buradan denetleyip nihai onayınızı verebilirsiniz.")
-        
-        # Öğrenci ve Soru Seçimi
-        col_sel1, col_sel2 = st.columns(2)
-        
-        student_ids = []
-        student_options = []
-        for s_id, record in st.session_state.student_records.items():
-            s_class = record.get("class", "5-A")
-            class_parts = s_class.split("-") if "-" in s_class else [s_class, ""]
-            grade_part = class_parts[0]
-            branch_part = class_parts[-1]
-            match_branch = (selected_branch == "Tümü" or branch_part == selected_branch)
-            match_grade = (selected_grade == "Tümü" or grade_part == selected_grade)
-            
-            if match_branch and match_grade:
-                student_ids.append(s_id)
-                status_icon = "✅" if record["status"] == "Onaylandı" else "⏳"
-                student_options.append(f"{status_icon} No: {s_id} - {record['name']} ({s_class})")
-                
-        if not student_options:
-            st.warning("⚠️ Seçili şubede taranmış öğrenci kağıdı bulunamadı. Lütfen aktif sınıf & şube filtrelerini kontrol edin.")
-        else:
-            with col_sel1:
-                selected_student_idx = st.selectbox(
-                    "İncelenecek Öğrenci",
-                    range(len(student_options)),
-                    format_func=lambda x: student_options[x],
-                    key="eval_student_select"
-                )
-                selected_student_id = student_ids[selected_student_idx]
-                student_record = st.session_state.student_records[selected_student_id]
-                
-            with col_sel2:
-                question_keys = list(st.session_state.exam_config["questions"].keys())
-                selected_q_id = st.selectbox(
-                    "İncelenecek Soru",
-                    question_keys,
-                    format_func=lambda x: st.session_state.exam_config["questions"][x]["title"],
-                    key="eval_q_select"
-                )
-                
-            question_info = st.session_state.exam_config["questions"][selected_q_id]
-            
-            # Soru Açıklaması
-            st.markdown(f"""
-                <div style='background-color:#1e2036; padding:12px 20px; border-radius:10px; margin-bottom:15px;'>
-                    <strong>Soru:</strong> {question_info['desc']}<br>
-                    <span style='color:#a78bfa; font-size:0.9rem;'><strong>Doğru Cevap Anahtarı:</strong> {question_info['correct_solution'].replace('\n', ' | ')}</span>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            grade_data = student_record["grades"].get(selected_q_id)
-            
-            # Öğrencinin taranmış görseli
-            active_image = st.session_state.get(f"custom_img_{selected_student_id}")
+            # Kağıt görseli
+            if img:
+                with st.expander("📄 Öğrenci Kağıdı Görseli", expanded=False):
+                    st.image(img, use_container_width=True)
 
-            if not grade_data:
-                st.warning(f"⏳ Bu öğrenciye ait Soru {selected_q_id} için AI notu bulunmamaktadır.")
-            else:
-                layout_col1, layout_col2 = st.columns([11, 10])
-                
-                with layout_col1:
-                    st.markdown("<h5 style='color:#a78bfa;'>📷 Öğrenci Kağıdı Görseli</h5>", unsafe_allow_html=True)
-                    if active_image:
-                        st.image(active_image, use_container_width=True, caption=f"{student_record['name']} - Orijinal Kağıt")
-                    else:
-                        st.info("Kağıt görseli bulunamadı.")
-                    
-                    with st.expander("📝 AI Okunan OCR Çözüm Metni", expanded=False):
-                        st.code(grade_data["student_solution"])
-                        
-                with layout_col2:
-                    st.markdown("<h5 style='color:#a78bfa;'>🤖 Yapay Zeka Değerlendirme Özeti</h5>", unsafe_allow_html=True)
-                    
-                    # Rubrik Metrikleri
-                    sub_col1, sub_col2, sub_col3, sub_col4 = st.columns(4)
-                    with sub_col1:
-                        st.metric("Kavramsal", f"{grade_data['score_concept']} / {question_info['rubric']['concept']}")
-                    with sub_col2:
-                        st.metric("İşlem Adımı", f"{grade_data['score_steps']} / {question_info['rubric']['steps']}")
-                    with sub_col3:
-                        st.metric("Sonuç", f"{grade_data['score_result']} / {question_info['rubric']['result']}")
-                    with sub_col4:
-                        st.metric("Toplam Puan", f"{grade_data['score_total']} / {question_info['max_score']}")
-                    
-                    # Muhakeme Gerekçesi
+            # Puan tablosu
+            grades = rec.get("grades", {})
+            if grades:
+                st.markdown("#### 📊 Soru Bazlı Puanlar")
+
+                total_score = 0
+                total_max   = 0
+
+                for qid in sorted(grades.keys(), key=lambda x: int(x) if x.isdigit() else x):
+                    g = grades[qid]
+                    score     = g.get("score", 0)
+                    max_score = g.get("max_score", cfg.get("questions", {}).get(qid, {}).get("max_score", "?"))
+                    feedback  = g.get("feedback", "")
+                    st_ans    = g.get("student_answer", "")
+
+                    total_score += score
+                    if isinstance(max_score, (int, float)):
+                        total_max += max_score
+
+                    pct = int(score / max_score * 100) if isinstance(max_score, (int, float)) and max_score > 0 else 0
+                    color = "#34d399" if pct >= 75 else ("#fbbf24" if pct >= 40 else "#f87171")
+
                     st.markdown(f"""
-                        <div class='premium-card' style='font-size:0.95rem; line-height:1.5; border-left:4px solid #6366f1;'>
-                            <h6 style='margin-top:0px; color:#6366f1;'>🔍 AI Adım Adım Notlandırma Gerekçesi:</h6>
-                            {grade_data['ai_feedback'].replace('\n', '<br>')}
+                    <div class='premium-card' style='margin-bottom:10px; padding:14px 18px;'>
+                        <div style='display:flex; justify-content:space-between; align-items:center;'>
+                            <span style='font-weight:700; color:#e8eaf6;'>Soru {qid}</span>
+                            <span style='font-size:1.4rem; font-weight:800; color:{color};'>{score} / {max_score}</span>
                         </div>
+                        {"<div style='color:#94a3b8; font-size:0.82rem; margin-top:4px;'>📝 Öğrenci: " + st_ans + "</div>" if st_ans else ""}
+                        {"<div style='color:#64748b; font-size:0.82rem; margin-top:4px;'>🤖 " + feedback + "</div>" if feedback else ""}
+                    </div>
                     """, unsafe_allow_html=True)
-                    
-                    # Öğretmen Düzenleme Sürgüsü
-                    st.markdown("<h6 style='color:#a78bfa;'>✏️ Öğretmen Değerlendirme Onayı & Müdahale Yetkisi</h6>", unsafe_allow_html=True)
-                    override_score = st.slider(
-                        "Öğrencinin Nihai Puanını Belirleyin",
-                        min_value=0.0,
-                        max_value=float(question_info["max_score"]),
-                        value=float(grade_data["teacher_score"]),
-                        step=0.5,
-                        key=f"slider_override_{selected_student_id}_{selected_q_id}"
-                    )
-                    
-                    is_overridden = override_score != float(grade_data["ai_score_initial"])
-                    
-                    if is_overridden:
-                        st.markdown(f"""
-                            <div class='info-card'>
-                                ⚠️ <strong>Puan Güncellemesi:</strong> AI puanı olan <strong>{grade_data['ai_score_initial']}</strong> yerine 
-                                manuel olarak <strong>{override_score}</strong> vermeyi seçtiniz.
-                            </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown("""
-                            <div class='success-card'>
-                                ✅ Puan AI'nın önerdiği ilk değerle tam uyumlu.
-                            </div>
-                        """, unsafe_allow_html=True)
-                        
-                    # Onayla & Kaydet
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        st.markdown("<div class='approve-btn'>", unsafe_allow_html=True)
-                        if st.button("✔️ Değerlendirmeyi Onayla ve Kaydet", key=f"btn_approve_eval_{selected_student_id}_{selected_q_id}"):
-                            save_teacher_approval(
-                                selected_student_id, 
-                                selected_q_id, 
-                                override_score, 
-                                is_overridden
-                            )
-                            check_student_all_approved(selected_student_id)
-                            st.success(f"{student_record['name']} - Soru {selected_q_id} onaylandı!")
-                            
-                            # Bir sonraki soruya otomatik geçiş
-                            next_q_idx = question_keys.index(selected_q_id) + 1
-                            if next_q_idx < len(question_keys):
-                                st.rerun()
-                            else:
-                                st.success(f"🎉 {student_record['name']} kağıdındaki tüm sorular başarıyla onaylandı!")
-                                st.rerun()
-                        st.markdown("</div>", unsafe_allow_html=True)
 
-# ==================== VIEW 4: NOT DEFTERİ & ANALİZ ====================
-elif st.session_state.active_tab == "not_defteri":
-    st.markdown("<h3 style='margin-bottom: 10px;'>📊 Sınav Not Defteri, Analiz ve Yönetim</h3>", unsafe_allow_html=True)
-    
-    if not st.session_state.student_records:
-        st.markdown("""
-            <div class='premium-card' style='text-align:center; padding: 40px;'>
-                <h4 style='color:#a78bfa;'>📉 İstatistikler ve Not Listesi Hazırlanıyor...</h4>
-                <p style='color:#94a3b8; font-size:1.05rem;'>Not defteriniz henüz boş. Öğrencilerinizin sınav kağıtlarını okuttuğunuzda;</p>
-                <p style='color:#94a3b8; font-size:1.05rem;'>sınıf başarı grafikleri, not listesi ve AI hata payı kalibrasyonu burada anında listelenecektir.</p>
-                <p style='color:#6366f1; font-weight:600; margin-top: 15px;'>Lütfen en alttaki yüzen çubuktan 📷 Kağıt Tarama ikonuna tıklayarak ilk kağıdı okutun!</p>
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.write("Sınav ortalamalarını, öğrenci not dökümlerini görebilir, taranan öğrenci kayıtlarını yönetebilir ve AI kalibrasyon verilerini inceleyebilirsiniz.")
-        
-        # ---------------- DAHILI ANALITIK KPI PANELI (Eski Tab 1 Dashboard) ----------------
-        st.markdown("<h5>📉 Sınıf Başarı İstatistikleri</h5>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f"""
-                <div class='metric-card'>
-                    <div class='metric-label'>Ortalama Sınıf Notu</div>
-                    <div class='metric-value'>{avg_score:.1f}</div>
-                    <div style='color: #34d399; font-size: 0.85rem; margin-top: 5px;'>Başarı Oranı: %{avg_score:.1f}</div>
+                # Toplam
+                t_color = "#34d399" if (total_max > 0 and total_score / total_max >= 0.5) else "#f87171"
+                st.markdown(f"""
+                <div style='background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3);
+                            border-radius:12px; padding:14px 20px; text-align:center; margin-top:10px;'>
+                    <span style='color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.06em;'>TOPLAM PUAN</span><br>
+                    <span style='font-size:2.5rem; font-weight:800; color:{t_color};'>{total_score}</span>
+                    <span style='font-size:1.1rem; color:#64748b;'> / {total_max}</span>
                 </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            completion_rate = (approved_count / total_students) * 100 if total_students > 0 else 0
-            st.markdown(f"""
-                <div class='metric-card'>
-                    <div class='metric-label'>Onaylanma Oranı</div>
-                    <div class='metric-value'>%{completion_rate:.0f}</div>
-                    <div style='color: #a78bfa; font-size: 0.85rem; margin-top: 5px;'>{approved_count} Onaylanan / {total_students} Toplam</div>
-                </div>
-            """, unsafe_allow_html=True)
-        with col3:
-            detailed_df = get_detailed_grades_dataframe()
-            detailed_df = filter_dataframe_by_class(detailed_df)
-            hardest_q = "Soru 25"
-            lowest_ratio = 1.0
-            
-            for q_id, q_info in st.session_state.exam_config["questions"].items():
-                col_name = f"Soru {q_id}"
-                if col_name in detailed_df.columns:
-                    avg_q = detailed_df[col_name].mean()
-                    ratio = avg_q / q_info["max_score"]
-                    if ratio < lowest_ratio:
-                        lowest_ratio = ratio
-                        hardest_q = f"Soru {q_id}"
-                        
-            st.markdown(f"""
-                <div class='metric-card'>
-                    <div class='metric-label'>En Çok Zorlanılan Soru</div>
-                    <div class='metric-value'>{hardest_q}</div>
-                    <div style='color: #f87171; font-size: 0.85rem; margin-top: 5px;'>Ortalama Başarı: %{lowest_ratio*100:.0f}</div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # ---------------- ÖĞRENCİ NOT LİSTESİ VE SİLME YÖNETİMİ ----------------
-        tab4_col1, tab4_col2 = st.columns([3, 2])
-        
-        with tab4_col1:
-            st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-            st.markdown("<h5>📋 Öğrenci Not Listesi</h5>", unsafe_allow_html=True)
-            st.write("Sınıfınızdaki öğrencilerin soru bazlı ve toplam sınav notları dökümü aşağıdadır:")
-            
-            detailed_table = get_detailed_grades_dataframe()
-            detailed_table = filter_dataframe_by_class(detailed_table)
-            
-            # HTML Tablosunun mobil uyumlu sarmalayıcı (.table-responsive) içine alınması (Yatay Kaydırma Çözümü)
-            html_table = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
-            for col in detailed_table.columns:
-                html_table += f"<th>{col}</th>"
-            html_table += "</tr></thead><tbody>"
-            
-            for _, row in detailed_table.iterrows():
-                html_table += "<tr>"
-                for col in detailed_table.columns:
-                    val = row[col]
-                    if col == "Durum":
-                        badge_class = "status-approved" if val == "Onaylandı" else "status-pending"
-                        html_table += f"<td><span class='status-badge {badge_class}'>{val}</span></td>"
-                    else:
-                        html_table += f"<td>{val}</td>"
-                html_table += "</tr>"
-            html_table += "</tbody></table></div>"
-            
-            st.markdown(html_table, unsafe_allow_html=True)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # CSV Dışa Aktarma
-            csv_data = detailed_table.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Sınav Sonuçlarını CSV Olarak İndir",
-                data=csv_data,
-                file_name="notver_sinav_sonuclari.csv",
-                mime="text/csv",
-                key="btn_download_csv_defter"
-            )
-            
-            # 🗑️ Öğrenci Kaydı Yönetimi & Silme Butonu
-            st.markdown("---")
-            st.markdown("<h5>🗑️ Öğrenci Kaydı Yönetimi (Silme)</h5>", unsafe_allow_html=True)
-            st.write("Okutulan veya listede kayıtlı olan bir öğrenciyi ve not dökümlerini sistemden tamamen silebilirsiniz:")
-            
-            delete_options = []
-            delete_mapping = {}
-            for s_id, record in st.session_state.student_records.items():
-                s_class = record.get("class", "5-A")
-                class_parts = s_class.split("-") if "-" in s_class else [s_class, ""]
-                grade_part = class_parts[0]
-                branch_part = class_parts[-1]
-                match_branch = (selected_branch == "Tümü" or branch_part == selected_branch)
-                match_grade = (selected_grade == "Tümü" or grade_part == selected_grade)
-                
-                if match_branch and match_grade:
-                    option_str = f"No: {s_id} - {record['name']} ({s_class})"
-                    delete_options.append(option_str)
-                    delete_mapping[option_str] = s_id
-                    
-            if not delete_options:
-                st.info("Silinebilecek kayıtlı öğrenci bulunmamaktadır.")
-            else:
-                col_del1, col_del2 = st.columns([3, 1])
-                with col_del1:
-                    selected_del_str = st.selectbox(
-                        "Silinecek Öğrenciyi Seçin",
-                        delete_options,
-                        key="selectbox_student_to_delete"
-                    )
-                with col_del2:
-                    st.markdown("<div class='delete-btn'>", unsafe_allow_html=True)
-                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True) # Dikey hizalama boşluğu
-                    if st.button("🗑️ Kaydı Sil", use_container_width=True, key="btn_confirm_delete"):
-                        s_id_to_delete = delete_mapping[selected_del_str]
-                        del st.session_state.student_records[s_id_to_delete]
-                        st.success("Öğrenci kaydı başarıyla silindi!")
+                """, unsafe_allow_html=True)
+
+                # Öğretmen onayı
+                if rec["status"] == "Değerlendirildi":
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown('<div class="approve-btn">', unsafe_allow_html=True)
+                    if st.button("✅ Değerlendirmeyi Onayla ve Kaydet",
+                                 key=f"approve_{sel_no}", use_container_width=True):
+                        st.session_state.student_records[sel_no]["status"] = "Onaylandı"
+                        st.session_state.student_records[sel_no]["total_score"] = total_score
+                        st.success(f"✅ {rec['name']} onaylandı! Toplam: {total_score}/{total_max}")
+                        # Bir sonraki öğrenciye geç
+                        idx = sorted_nos.index(sel_no)
+                        if idx + 1 < len(sorted_nos):
+                            st.session_state.selected_student_no = sorted_nos[idx + 1]
                         st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    
-            st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-        with tab4_col2:
-            st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-            st.markdown("<h5>🎯 Öğretmen - AI Kalibrasyon Analizi</h5>", unsafe_allow_html=True)
-            st.write(
-                "Öğretmenin AI puanlarına yaptığı manuel müdahaleler ve düzeltmeler burada analiz edilir. "
-                "Bu veriler, sistemin gelecekteki sınavlarda daha doğru puanlama yapabilmesi için kalibre edilmesinde kullanılır."
-            )
-            
-            cal_stats = get_calibration_analytics()
-            
-            if not cal_stats["has_data"]:
-                st.info(
-                    "Henüz hiçbir puanda manuel değişiklik yapmadınız. "
-                    "AI puanlarını düzenlediğinizde, kalibrasyon analiz grafiği ve hata payı verileri burada belirecektir."
-                )
-            else:
-                # Kalibrasyon Metrikleri
-                kpi1, kpi2 = st.columns(2)
-                with kpi1:
-                    st.metric(
-                        "Ortalama Hata Payı (MAE)", 
-                        f"{cal_stats['mae']} Puan",
-                        help="Öğretmenin manuel düzeltmelerinin AI'ın ilk tahmininden olan ortalama mutlak sapma puanı."
-                    )
-                with kpi2:
-                    st.metric(
-                        "Toplam Düzeltme Sayısı", 
-                        f"{cal_stats['total_corrections']} Adet"
-                    )
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # Kalibrasyon Grafiği (AI vs Öğretmen Dağılım Grafiği)
-                df_cal = cal_stats["data"]
-                fig_cal = px.scatter(
-                    df_cal,
-                    x="ai_score",
-                    y="teacher_score",
-                    color="question",
-                    hover_data=["student_name", "difference"],
-                    labels={"ai_score": "Yapay Zeka Puanı", "teacher_score": "Öğretmen Nihai Puanı"},
-                    title="Yapay Zeka vs Öğretmen Puan Karşılaştırması"
-                )
-                # 1'e 1 referans çizgisi ekleme (Mükemmel uyum çizgisi)
-                min_val = min(df_cal["ai_score"].min(), df_cal["teacher_score"].min()) - 1
-                max_val = max(df_cal["ai_score"].max(), df_cal["teacher_score"].max()) + 1
-                fig_cal.add_trace(go.Scatter(
-                    x=[min_val, max_val],
-                    y=[min_val, max_val],
-                    mode='lines',
-                    name='Mükemmel Uyum',
-                    line=dict(dash='dash', color='rgba(255,255,255,0.3)')
-                ))
-                
-                fig_cal.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font_color='#94a3b8',
-                    xaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
-                    yaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    height=260
-                )
-                st.plotly_chart(fig_cal, use_container_width=True)
-                
-                # Değişiklik Günlüğü Tablosu
-                st.markdown("<h6>📝 Yapılan Düzeltmelerin Kaydı</h6>", unsafe_allow_html=True)
-                st.dataframe(
-                    df_cal.rename(columns={
-                        "student_name": "Öğrenci",
-                        "question": "Soru",
-                        "ai_score": "AI Puan",
-                        "teacher_score": "Öğretmen Puan",
-                        "difference": "Fark"
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
-                
-            st.markdown("</div>", unsafe_allow_html=True)
+                elif rec["status"] == "Onaylandı":
+                    st.markdown("""
+                    <div class='callout-success'>
+                        ✅ Bu öğrencinin değerlendirmesi onaylandı ve not çizelgesine eklendi.
+                    </div>
+                    """, unsafe_allow_html=True)
 
+
+# ╔═══════════════════════════════════════════════════════╗
+# ║  TAB 4 — NOT ÇİZELGESİ                               ║
+# ╚═══════════════════════════════════════════════════════╝
+elif active == "not_cizelgesi":
+    st.markdown("## 📋 Not Çizelgesi")
+
+    records = st.session_state.student_records
+    onaylanan = {no: r for no, r in records.items() if r.get("status") == "Onaylandı"}
+
+    if not onaylanan:
+        st.markdown("""
+        <div class='callout-info'>
+            📭 Henüz onaylanmış öğrenci kaydı bulunmamaktadır.<br>
+            AI Değerlendirme sekmesinden öğrencileri değerlendirip onaylayın.
+        </div>
+        """, unsafe_allow_html=True)
+        st.stop()
+
+    st.markdown(f"""
+    <div class='callout-success'>
+        ✅ <strong>{len(onaylanan)} öğrenci</strong> onaylandı. Numara sırasına göre listelenmiştir.
+    </div>
+    """, unsafe_allow_html=True)
+
+    df = get_approved_grades_dataframe()
+
+    if not df.empty:
+        # ── Özet istatistikler ──
+        questions = st.session_state.exam_config.get("questions", {})
+        total_max = sum(q.get("max_score", 0) for q in questions.values()) if questions else 0
+        avg = df["Toplam"].mean() if "Toplam" in df.columns else 0
+
+        kpi1, kpi2, kpi3 = st.columns(3)
+        with kpi1:
+            st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>Toplam Öğrenci</div>
+                <div class='metric-value'>{len(df)}</div>
+            </div>""", unsafe_allow_html=True)
+        with kpi2:
+            st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>Sınıf Ortalaması</div>
+                <div class='metric-value'>{avg:.1f}</div>
+            </div>""", unsafe_allow_html=True)
+        with kpi3:
+            pct = (avg / total_max * 100) if total_max > 0 else 0
+            st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>Ortalama Başarı %</div>
+                <div class='metric-value'>%{pct:.0f}</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── HTML Tablosu (yatay kaydırmalı, mobil uyumlu) ──
+        html_table = "<div class='table-responsive'><table class='custom-table'><thead><tr>"
+        for col in df.columns:
+            html_table += f"<th>{col}</th>"
+        html_table += "</tr></thead><tbody>"
+
+        for _, row in df.iterrows():
+            html_table += "<tr>"
+            for col in df.columns:
+                val = row[col]
+                if col == "Toplam":
+                    pct_s = (val / total_max * 100) if total_max > 0 else 0
+                    color = "#34d399" if pct_s >= 50 else "#f87171"
+                    html_table += f"<td style='font-weight:700; color:{color};'>{val}</td>"
+                else:
+                    html_table += f"<td>{val}</td>"
+            html_table += "</tr>"
+
+        html_table += "</tbody></table></div>"
+        st.markdown(html_table, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── CSV İndir ──
+        csv = df.to_csv(index=False).encode("utf-8")
+        cfg = st.session_state.exam_config
+        st.download_button(
+            label="📥 Not Çizelgesini CSV Olarak İndir",
+            data=csv,
+            file_name=f"notlar_{cfg.get('grade', '')}_{cfg.get('branch', '')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
